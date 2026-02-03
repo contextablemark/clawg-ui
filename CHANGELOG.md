@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1 (2026-02-03)
+
+### Changed
+- Endpoint path changed from `/v1/agui` to `/v1/clawg-ui`
+- Package name changed to `@contextableai/clawg-ui`
+
 ## 0.1.0 (2026-02-02)
 
 Initial release.
