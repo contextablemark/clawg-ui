@@ -15,7 +15,7 @@ import {
 
 const plugin = {
   id: "clawg-ui",
-  name: "AG-UI",
+  name: "CLAWG-UI",
   description: "AG-UI protocol endpoint for CopilotKit and HttpAgent clients",
   configSchema: emptyPluginConfigSchema(),
   register(api: OpenClawPluginApi) {

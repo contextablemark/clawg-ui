@@ -35,11 +35,16 @@
     ],
     "channel": {
       "id": "clawg-ui",
-      "label": "AG-UI",
-      "docsPath": "/channels/agui",
-      "docsLabel": "agui",
+      "label": "CLAWG-UI",
+      "docsPath": "/channels/clawg-ui",
+      "docsLabel": "clawg-ui",
       "blurb": "AG-UI protocol endpoint for CopilotKit and HttpAgent clients.",
       "order": 90
+    },
+    "install": {
+      "npmSpec": "@contextableai/clawg-ui",
+      "localPath": "extensions/clawg-ui",
+      "defaultChoice": "npm"
     }
   }
 }
