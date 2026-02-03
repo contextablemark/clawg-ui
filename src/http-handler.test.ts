@@ -192,7 +192,7 @@ describe("AG-UI HTTP handler", () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it("rejects missing user message with 400", async () => {
+  it("rejects messages with only system role with 400", async () => {
     const req = createReq({
       body: {
         threadId: "t1",
@@ -203,6 +203,26 @@ describe("AG-UI HTTP handler", () => {
     const res = createRes();
     await handler(req, res);
     expect(res.statusCode).toBe(400);
+  });
+
+  it("accepts tool-only messages (tool result submission)", async () => {
+    const req = createReq({
+      body: {
+        threadId: "t-tool-only",
+        runId: "r-tool-only",
+        messages: [
+          { role: "tool", toolCallId: "tc-1", content: "72°F sunny" },
+        ],
+      },
+    });
+    const res = createRes();
+    await handler(req, res);
+
+    // Should proceed with normal SSE flow
+    const events = parseEvents(res._chunks);
+    const types = events.map((e) => e.type);
+    expect(types[0]).toBe(EventType.RUN_STARTED);
+    expect(types).toContain(EventType.RUN_FINISHED);
   });
 
   it("emits RUN_STARTED as first SSE event", async () => {

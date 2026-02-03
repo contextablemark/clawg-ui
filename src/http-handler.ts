@@ -89,33 +89,43 @@ function buildBodyFromMessages(messages: Message[]): {
   const systemParts: string[] = [];
   const parts: string[] = [];
   let lastUserBody = "";
+  let lastToolBody = "";
 
   for (const msg of messages) {
     const role = msg.role?.trim() ?? "";
     const content = extractTextContent(msg).trim();
-    if (!role || !content) {
+    // Allow messages with no content (e.g., assistant with only toolCalls)
+    if (!role) {
       continue;
     }
     if (role === "system") {
-      systemParts.push(content);
+      if (content) systemParts.push(content);
       continue;
     }
     if (role === "user") {
       lastUserBody = content;
-      parts.push(`User: ${content}`);
+      if (content) parts.push(`User: ${content}`);
     } else if (role === "assistant") {
-      parts.push(`Assistant: ${content}`);
+      if (content) parts.push(`Assistant: ${content}`);
     } else if (role === "tool") {
-      parts.push(`Tool: ${content}`);
+      lastToolBody = content;
+      if (content) parts.push(`Tool result: ${content}`);
     }
   }
 
   // If there's only a single user message, use it directly (no envelope needed)
+  // If there's only a tool result (resuming after client tool), use it directly
   const userMessages = messages.filter((m) => m.role === "user");
-  const body =
-    userMessages.length === 1 && parts.length === 1
-      ? lastUserBody
-      : parts.join("\n");
+  const toolMessages = messages.filter((m) => m.role === "tool");
+  let body: string;
+  if (userMessages.length === 1 && parts.length === 1) {
+    body = lastUserBody;
+  } else if (userMessages.length === 0 && toolMessages.length > 0 && parts.length === toolMessages.length) {
+    // Tool-result-only submission: format as tool result for agent context
+    body = `Tool result: ${lastToolBody}`;
+  } else {
+    body = parts.join("\n");
+  }
 
   return {
     body,
@@ -199,10 +209,11 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
       : [];
 
     const hasUserMessage = messages.some((m) => m.role === "user");
-    if (!hasUserMessage) {
+    const hasToolMessage = messages.some((m) => m.role === "tool");
+    if (!hasUserMessage && !hasToolMessage) {
       sendJson(res, 400, {
         error: {
-          message: "At least one user message is required in `messages`.",
+          message: "At least one user or tool message is required in `messages`.",
           type: "invalid_request_error",
         },
       });
