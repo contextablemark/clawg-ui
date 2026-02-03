@@ -7,20 +7,20 @@ An [OpenClaw](https://github.com/openclaw/openclaw) channel plugin that exposes 
 ## Installation
 
 ```bash
-npm install contextable/clawg-ui
+npm install @contextableai/clawg-ui
 ```
 
 Or with the OpenClaw plugin CLI:
 
 ```bash
-openclaw plugins install contextable/clawg-ui
+openclaw plugins install @contextableai/clawg-ui
 ```
 
-Then restart the gateway. The plugin auto-registers the `/v1/agui` endpoint and the `agui` channel.
+Then restart the gateway. The plugin auto-registers the `/v1/clawg-ui` endpoint and the `clawg-ui` channel.
 
 ## How it works
 
-The plugin registers as an OpenClaw channel and adds an HTTP route at `/v1/agui`. When an AG-UI client POSTs a `RunAgentInput` payload, the plugin:
+The plugin registers as an OpenClaw channel and adds an HTTP route at `/v1/clawg-ui`. When an AG-UI client POSTs a `RunAgentInput` payload, the plugin:
 
 1. Authenticates the request using the gateway bearer token
 2. Parses the AG-UI messages into an OpenClaw inbound context
@@ -65,7 +65,7 @@ AG-UI Client                        OpenClaw Gateway
 ### curl
 
 ```bash
-curl -N -X POST http://localhost:18789/v1/agui \
+curl -N -X POST http://localhost:18789/v1/clawg-ui \
   -H "Content-Type: application/json" \
   -H "Accept: text/event-stream" \
   -H "Authorization: Bearer $OPENCLAW_GATEWAY_TOKEN" \
@@ -84,7 +84,7 @@ curl -N -X POST http://localhost:18789/v1/agui \
 import { HttpAgent } from "@ag-ui/client";
 
 const agent = new HttpAgent({
-  url: "http://localhost:18789/v1/agui",
+  url: "http://localhost:18789/v1/clawg-ui",
   headers: {
     Authorization: `Bearer ${process.env.OPENCLAW_GATEWAY_TOKEN}`,
   },
@@ -94,7 +94,7 @@ const stream = agent.run({
   threadId: "thread-1",
   runId: "run-1",
   messages: [
-    { role: "user", content: "Hello from AG-UI" },
+    { role: "user", content: "Hello from CLAWG-UI" },
   ],
 });
 
@@ -111,7 +111,7 @@ import { CopilotKit } from "@copilotkit/react-core";
 function App() {
   return (
     <CopilotKit
-      runtimeUrl="http://localhost:18789/v1/agui"
+      runtimeUrl="http://localhost:18789/v1/clawg-ui"
       headers={{
         Authorization: `Bearer ${process.env.OPENCLAW_GATEWAY_TOKEN}`,
       }}
@@ -178,7 +178,7 @@ Authorization: Bearer <token>
 The plugin uses OpenClaw's standard agent routing. By default, messages route to the `main` agent. To target a specific agent, set the `X-OpenClaw-Agent-Id` header:
 
 ```bash
-curl -N -X POST http://localhost:18789/v1/agui \
+curl -N -X POST http://localhost:18789/v1/clawg-ui \
   -H "Authorization: Bearer $OPENCLAW_GATEWAY_TOKEN" \
   -H "X-OpenClaw-Agent-Id: my-agent" \
   -d '{"messages":[{"role":"user","content":"Hello"}]}'
@@ -199,7 +199,7 @@ Streaming errors emit a `RUN_ERROR` event and close the connection.
 ## Development
 
 ```bash
-git clone https://github.com/contextable/clawg-ui
+git clone https://github.com/contextablemark/clawg-ui
 cd clawg-ui
 npm install
 npm test
