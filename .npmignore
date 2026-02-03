@@ -1,17 +1,9 @@
-# Source files (dist is published)
-src/
-
 # Test files
 *.test.ts
 *.e2e.test.ts
 *.live.test.ts
 vitest.config.ts
 
-# Config files
-tsconfig.json
-.gitignore
-
 # Dev artifacts
-node_modules/
 coverage/
 *.log
