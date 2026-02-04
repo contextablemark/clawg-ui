@@ -22,7 +22,7 @@ Then restart the gateway. The plugin auto-registers the `/v1/clawg-ui` endpoint 
 
 The plugin registers as an OpenClaw channel and adds an HTTP route at `/v1/clawg-ui`. When an AG-UI client POSTs a `RunAgentInput` payload, the plugin:
 
-1. Authenticates the request using the gateway bearer token
+1. Authenticates the request using device pairing (see [Authentication](#authentication))
 2. Parses the AG-UI messages into an OpenClaw inbound context
 3. Routes to the appropriate agent via the gateway's standard routing
 4. Dispatches the message through the reply pipeline (same path as Telegram, Teams, etc.)
@@ -31,9 +31,9 @@ The plugin registers as an OpenClaw channel and adds an HTTP route at `/v1/clawg
 ```
 AG-UI Client                        OpenClaw Gateway
     |                                      |
-    |  POST /v1/agui (RunAgentInput)       |
+    |  POST /v1/clawg-ui (RunAgentInput)   |
     |------------------------------------->|
-    |                                      |  Auth (bearer token)
+    |                                      |  Auth (device token)
     |                                      |  Route to agent
     |                                      |  Dispatch inbound message
     |                                      |
@@ -60,15 +60,16 @@ AG-UI Client                        OpenClaw Gateway
 ### Prerequisites
 
 - OpenClaw gateway running (`openclaw gateway run`)
-- A gateway auth token configured (`OPENCLAW_GATEWAY_TOKEN` env var or `gateway.auth.token` in config)
+- A paired device token (see [Authentication](#authentication))
 
 ### curl
 
 ```bash
+# Using your device token (obtained through pairing)
 curl -N -X POST http://localhost:18789/v1/clawg-ui \
   -H "Content-Type: application/json" \
   -H "Accept: text/event-stream" \
-  -H "Authorization: Bearer $OPENCLAW_GATEWAY_TOKEN" \
+  -H "Authorization: Bearer $CLAWG_UI_DEVICE_TOKEN" \
   -d '{
     "threadId": "thread-1",
     "runId": "run-1",
@@ -83,10 +84,13 @@ curl -N -X POST http://localhost:18789/v1/clawg-ui \
 ```typescript
 import { HttpAgent } from "@ag-ui/client";
 
+// Device token obtained through the pairing flow
+const deviceToken = process.env.CLAWG_UI_DEVICE_TOKEN;
+
 const agent = new HttpAgent({
   url: "http://localhost:18789/v1/clawg-ui",
   headers: {
-    Authorization: `Bearer ${process.env.OPENCLAW_GATEWAY_TOKEN}`,
+    Authorization: `Bearer ${deviceToken}`,
   },
 });
 
@@ -108,12 +112,15 @@ for await (const event of stream) {
 ```tsx
 import { CopilotKit } from "@copilotkit/react-core";
 
+// Device token obtained through the pairing flow
+const deviceToken = process.env.CLAWG_UI_DEVICE_TOKEN;
+
 function App() {
   return (
     <CopilotKit
       runtimeUrl="http://localhost:18789/v1/clawg-ui"
       headers={{
-        Authorization: `Bearer ${process.env.OPENCLAW_GATEWAY_TOKEN}`,
+        Authorization: `Bearer ${deviceToken}`,
       }}
     >
       {/* your app */}
@@ -162,16 +169,122 @@ The response is an SSE stream. Each event is a `data:` line containing a JSON ob
 
 ## Authentication
 
-The endpoint uses the same bearer token as the OpenClaw gateway. Set it via:
+clawg-ui uses **device pairing** to authenticate clients. This provides secure, per-device access control without exposing the gateway's master token.
 
-- Environment variable: `OPENCLAW_GATEWAY_TOKEN`
-- Config file: `gateway.auth.token`
-
-Pass it in the `Authorization` header:
+### Device Pairing Flow
 
 ```
-Authorization: Bearer <token>
+┌─────────────────┐      ┌──────────────────┐      ┌─────────────────┐
+│  Gateway Owner  │      │  OpenClaw Server │      │   AG-UI Client  │
+└────────┬────────┘      └────────┬─────────┘      └────────┬────────┘
+         │                        │                         │
+         │                        │  1. POST (no auth)      │
+         │                        │<────────────────────────│
+         │                        │                         │
+         │                        │  2. Return device token │
+         │                        │     + pairing code      │
+         │                        │────────────────────────>│
+         │                        │     403 pairing_pending │
+         │                        │     { pairingCode, token }
+         │                        │                         │
+         │              3. Share pairing code (out of band) │
+         │<─────────────────────────────────────────────────│
+         │                        │                         │
+    4. Approve device             │                         │
+         │  openclaw pairing approve clawg-ui ABCD1234      │
+         │───────────────────────>│                         │
+         │                        │                         │
+         │                        │  5. POST with device token
+         │                        │<────────────────────────│
+         │                        │     Authorization: Bearer <token>
+         │                        │                         │
+         │                        │  6. Success - SSE stream│
+         │                        │────────────────────────>│
+         │                        │                         │
 ```
+
+### Step-by-Step Setup
+
+#### 1. Client initiates pairing
+
+The client sends a POST request without any authorization header:
+
+```bash
+curl -X POST http://localhost:18789/v1/clawg-ui \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+Response (403):
+
+```json
+{
+  "error": {
+    "type": "pairing_pending",
+    "message": "Device pending approval",
+    "pairing": {
+      "pairingCode": "ABCD1234",
+      "token": "MmRlOTA0ODIt...b71d",
+      "instructions": "Save this token for use as a Bearer token and ask the owner to approve: openclaw pairing approve clawg-ui ABCD1234"
+    }
+  }
+}
+```
+
+The client must save the `token` for future requests.
+
+#### 2. Approve the device (gateway owner)
+
+The client shares the `pairingCode` with the gateway owner, who approves it:
+
+```bash
+# List pending pairing requests
+openclaw pairing list clawg-ui
+
+# Approve the device
+openclaw pairing approve clawg-ui ABCD1234
+```
+
+#### 3. Client uses Bearer token
+
+Once approved, the client uses their Bearer token for all requests:
+
+```bash
+curl -N -X POST http://localhost:18789/v1/clawg-ui \
+  -H "Authorization: Bearer MmRlOTA0ODIt...b71d" \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"Hello"}]}'
+```
+
+### CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `openclaw clawg-ui devices` | List approved devices |
+| `openclaw pairing list clawg-ui` | List pending pairing requests awaiting approval |
+| `openclaw pairing approve clawg-ui <code>` | Approve a device by its pairing code |
+
+### Error Responses
+
+| Status | Type | Meaning |
+|--------|------|---------|
+| 401 | `unauthorized` | Invalid device token |
+| 403 | `pairing_pending` | No auth (initiates pairing) or valid token but device not yet approved |
+
+### Deprecated: Direct Bearer Token
+
+> **Deprecated:** Previous versions (0.1.x) allowed using the gateway's master token (`OPENCLAW_GATEWAY_TOKEN`) directly. This approach is **no longer supported**. All clients must now use device pairing.
+>
+> Old (deprecated):
+> ```
+> Authorization: Bearer $OPENCLAW_GATEWAY_TOKEN
+> ```
+>
+> New (required):
+> ```
+> POST without Authorization header  # Initiates pairing
+> Authorization: Bearer <device-token>  # After approval
+> ```
 
 ## Agent routing
 
@@ -179,7 +292,7 @@ The plugin uses OpenClaw's standard agent routing. By default, messages route to
 
 ```bash
 curl -N -X POST http://localhost:18789/v1/clawg-ui \
-  -H "Authorization: Bearer $OPENCLAW_GATEWAY_TOKEN" \
+  -H "Authorization: Bearer $CLAWG_UI_DEVICE_TOKEN" \
   -H "X-OpenClaw-Agent-Id: my-agent" \
   -d '{"messages":[{"role":"user","content":"Hello"}]}'
 ```
@@ -188,11 +301,12 @@ curl -N -X POST http://localhost:18789/v1/clawg-ui \
 
 Non-streaming errors return JSON:
 
-| Status | Meaning |
-|---|---|
-| 400 | Invalid request (missing messages, bad JSON) |
-| 401 | Unauthorized (missing or invalid token) |
-| 405 | Method not allowed (only POST accepted) |
+| Status | Type | Meaning |
+|---|---|---|
+| 400 | `invalid_request_error` | Invalid request (missing messages, bad JSON) |
+| 401 | `unauthorized` | Invalid device token |
+| 403 | `pairing_pending` | No auth header (initiates pairing) or valid token but device not yet approved |
+| 405 | — | Method not allowed (only POST accepted) |
 
 Streaming errors emit a `RUN_ERROR` event and close the connection.
 

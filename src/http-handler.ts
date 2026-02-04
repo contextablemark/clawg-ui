@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHmac, timingSafeEqual } from "node:crypto";
 import { EventType } from "@ag-ui/core";
 import type { RunAgentInput, Message } from "@ag-ui/core";
 import { EventEncoder } from "@ag-ui/encoder";
@@ -13,6 +13,7 @@ import {
   clearClientToolCalled,
   clearClientToolNames,
 } from "./tool-store.js";
+import { aguiChannelPlugin } from "./channel.js";
 
 // ---------------------------------------------------------------------------
 // Lightweight HTTP helpers (no internal imports needed)
@@ -32,7 +33,7 @@ function sendMethodNotAllowed(res: ServerResponse) {
 }
 
 function sendUnauthorized(res: ServerResponse) {
-  sendJson(res, 401, { error: { message: "Unauthorized", type: "unauthorized" } });
+  sendJson(res, 401, { error: { message: "Authentication required", type: "unauthorized" } });
 }
 
 function readJsonBody(req: IncomingMessage, maxBytes: number): Promise<unknown> {
@@ -65,6 +66,51 @@ function getBearerToken(req: IncomingMessage): string | undefined {
     return undefined;
   }
   return raw.slice(7).trim() || undefined;
+}
+
+// ---------------------------------------------------------------------------
+// HMAC-signed device token utilities
+// ---------------------------------------------------------------------------
+
+function createDeviceToken(secret: string, deviceId: string): string {
+  const encodedId = Buffer.from(deviceId).toString("base64url");
+  const signature = createHmac("sha256", secret).update(deviceId).digest("hex").slice(0, 32);
+  return `${encodedId}.${signature}`;
+}
+
+function verifyDeviceToken(token: string, secret: string): string | null {
+  const dotIndex = token.indexOf(".");
+  if (dotIndex <= 0 || dotIndex >= token.length - 1) {
+    return null;
+  }
+
+  const encodedId = token.slice(0, dotIndex);
+  const providedSig = token.slice(dotIndex + 1);
+
+  try {
+    const deviceId = Buffer.from(encodedId, "base64url").toString("utf-8");
+
+    // Validate it looks like a UUID
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(deviceId)) {
+      return null;
+    }
+
+    const expectedSig = createHmac("sha256", secret).update(deviceId).digest("hex").slice(0, 32);
+
+    // Constant-time comparison
+    if (providedSig.length !== expectedSig.length) {
+      return null;
+    }
+    const providedBuf = Buffer.from(providedSig);
+    const expectedBuf = Buffer.from(expectedSig);
+    if (!timingSafeEqual(providedBuf, expectedBuf)) {
+      return null;
+    }
+
+    return deviceId;
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -134,35 +180,19 @@ function buildBodyFromMessages(messages: Message[]): {
 }
 
 // ---------------------------------------------------------------------------
-// Token-based auth check against gateway config
+// Gateway secret resolution
 // ---------------------------------------------------------------------------
 
-function authenticateRequest(
-  req: IncomingMessage,
-  api: OpenClawPluginApi,
-): boolean {
-  const token = getBearerToken(req);
-  if (!token) {
-    return false;
-  }
-  // Read the configured gateway token from config
+function getGatewaySecret(api: OpenClawPluginApi): string | null {
   const gatewayAuth = api.config.gateway?.auth;
-  const configuredToken =
+  const secret =
     (gatewayAuth as Record<string, unknown> | undefined)?.token ??
     process.env.OPENCLAW_GATEWAY_TOKEN ??
     process.env.CLAWDBOT_GATEWAY_TOKEN;
-  if (typeof configuredToken !== "string" || !configuredToken) {
-    return false;
+  if (typeof secret === "string" && secret) {
+    return secret;
   }
-  // Constant-time comparison
-  if (token.length !== configuredToken.length) {
-    return false;
-  }
-  let mismatch = 0;
-  for (let i = 0; i < token.length; i++) {
-    mismatch |= token.charCodeAt(i) ^ configuredToken.charCodeAt(i);
-  }
-  return mismatch === 0;
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -182,11 +212,84 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
       return;
     }
 
-    // Auth
-    if (!authenticateRequest(req, api)) {
+    // Get gateway secret for HMAC operations
+    const gatewaySecret = getGatewaySecret(api);
+    if (!gatewaySecret) {
+      sendJson(res, 500, {
+        error: { message: "Gateway not configured", type: "server_error" },
+      });
+      return;
+    }
+
+    // ---------------------------------------------------------------------------
+    // Authentication: No auth (pairing initiation) or Device token
+    // ---------------------------------------------------------------------------
+    let deviceId: string;
+
+    const bearerToken = getBearerToken(req);
+
+    if (!bearerToken) {
+      // No auth header: initiate pairing
+      // Generate new device ID
+      deviceId = randomUUID();
+
+      // Add to pending via OpenClaw pairing API - returns a pairing code for approval
+      const { code: pairingCode } = await runtime.channel.pairing.upsertPairingRequest({
+        channel: "clawg-ui",
+        id: deviceId,
+        pairingAdapter: aguiChannelPlugin.pairing,
+      });
+
+      // Generate signed device token
+      const deviceToken = createDeviceToken(gatewaySecret, deviceId);
+
+      // Return pairing pending response with device token and pairing code
+      sendJson(res, 403, {
+        error: {
+          type: "pairing_pending",
+          message: "Device pending approval",
+          pairing: {
+            pairingCode,
+            token: deviceToken,
+            instructions: `Save this token for use as a Bearer token and ask the owner to approve: openclaw pairing approve clawg-ui ${pairingCode}`,
+          },
+        },
+      });
+      return;
+    }
+
+    // Device token flow: verify HMAC signature, extract device ID
+    const extractedDeviceId = verifyDeviceToken(bearerToken, gatewaySecret);
+    if (!extractedDeviceId) {
       sendUnauthorized(res);
       return;
     }
+    deviceId = extractedDeviceId;
+
+    // ---------------------------------------------------------------------------
+    // Pairing check: verify device is approved
+    // ---------------------------------------------------------------------------
+    const storeAllowFrom = await runtime.channel.pairing
+      .readAllowFromStore("clawg-ui")
+      .catch(() => []);
+    const normalizedAllowFrom = storeAllowFrom.map((e) =>
+      e.replace(/^clawg-ui:/i, "").toLowerCase(),
+    );
+    const allowed = normalizedAllowFrom.includes(deviceId.toLowerCase());
+
+    if (!allowed) {
+      sendJson(res, 403, {
+        error: {
+          type: "pairing_pending",
+          message: "Device pending approval. Ask the owner to approve using the pairing code from your initial pairing response.",
+        },
+      });
+      return;
+    }
+
+    // ---------------------------------------------------------------------------
+    // Device approved - proceed with request
+    // ---------------------------------------------------------------------------
 
     // Parse body
     let body: unknown;
@@ -257,12 +360,12 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
     const messageId = `msg-${randomUUID()}`;
     let messageStarted = false;
 
-    const writeEvent = (event: Record<string, unknown>) => {
+    const writeEvent = (event: { type: EventType } & Record<string, unknown>) => {
       if (closed) {
         return;
       }
       try {
-        res.write(encoder.encode(event));
+        res.write(encoder.encode(event as Parameters<typeof encoder.encode>[0]));
       } catch {
         // Client may have disconnected
         closed = true;
@@ -316,13 +419,13 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
       Body: envelopedBody,
       RawBody: messageBody,
       CommandBody: messageBody,
-      From: `clawg-ui:${threadId}`,
+      From: `clawg-ui:${deviceId}`,
       To: "clawg-ui",
       SessionKey: sessionKey,
       ChatType: "direct",
       ConversationLabel: "AG-UI",
       SenderName: "AG-UI Client",
-      SenderId: `clawg-ui-${threadId}`,
+      SenderId: deviceId,
       Provider: "clawg-ui" as const,
       Surface: "clawg-ui" as const,
       MessageSid: runId,

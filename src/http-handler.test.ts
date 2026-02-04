@@ -34,9 +34,8 @@ function createReq(
   const emitter = new EventEmitter() as IncomingMessage & EventEmitter;
   Object.assign(emitter, {
     method: overrides.method ?? "POST",
-    url: "/v1/agui",
+    url: "/v1/clawg-ui",
     headers: {
-      authorization: "Bearer test-token",
       accept: "text/event-stream",
       "content-type": "application/json",
       ...overrides.headers,
@@ -109,17 +108,35 @@ function parseEvents(
 }
 
 // ---------------------------------------------------------------------------
+// HMAC token utilities (duplicated from http-handler for testing)
+// ---------------------------------------------------------------------------
+
+import { createHmac } from "node:crypto";
+
+function createDeviceToken(secret: string, deviceId: string): string {
+  const encodedId = Buffer.from(deviceId).toString("base64url");
+  const signature = createHmac("sha256", secret).update(deviceId).digest("hex").slice(0, 32);
+  return `${encodedId}.${signature}`;
+}
+
+// ---------------------------------------------------------------------------
 // Fake plugin API + runtime
 // ---------------------------------------------------------------------------
 
-function createFakeApi() {
+function createFakeApi(approvedDevices: string[] = []) {
   const dispatchReplyFromConfig = vi.fn().mockResolvedValue({
     queuedFinal: true,
     counts: { tool: 0, block: 0, final: 1 },
   });
 
+  const upsertPairingRequest = vi.fn().mockResolvedValue({
+    code: "TEST1234",
+  });
+
+  const readAllowFromStore = vi.fn().mockResolvedValue(approvedDevices);
+
   return {
-    config: { gateway: { auth: { token: "test-token" } } },
+    config: { gateway: { auth: { token: "test-gateway-secret" } } },
     runtime: {
       config: {
         loadConfig: () => ({
@@ -149,6 +166,10 @@ function createFakeApi() {
             .mockImplementation((ctx: Record<string, unknown>) => ctx),
           dispatchReplyFromConfig,
         },
+        pairing: {
+          upsertPairingRequest,
+          readAllowFromStore,
+        },
       },
     },
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -159,16 +180,20 @@ function createFakeApi() {
 // Tests
 // ---------------------------------------------------------------------------
 
+const GATEWAY_SECRET = "test-gateway-secret";
+const APPROVED_DEVICE_ID = "12345678-1234-1234-1234-123456789abc";
+
 describe("AG-UI HTTP handler", () => {
   let fakeApi: ReturnType<typeof createFakeApi>;
   let handler: (req: IncomingMessage, res: ServerResponse) => Promise<void>;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    fakeApi = createFakeApi();
+    // Create fake API with the approved device
+    fakeApi = createFakeApi([APPROVED_DEVICE_ID]);
     handler = createAguiHttpHandler(fakeApi as any);
     // Set env token for auth fallback
-    process.env.OPENCLAW_GATEWAY_TOKEN = "test-token";
+    process.env.OPENCLAW_GATEWAY_TOKEN = GATEWAY_SECRET;
   });
 
   it("rejects non-POST with 405", async () => {
@@ -178,9 +203,9 @@ describe("AG-UI HTTP handler", () => {
     expect(res.statusCode).toBe(405);
   });
 
-  it("rejects unauthenticated with 401", async () => {
+  it("rejects invalid bearer token with 401", async () => {
     const req = createReq({
-      headers: { authorization: "Bearer wrong-token" },
+      headers: { authorization: "Bearer invalid.token" },
       body: {
         threadId: "t1",
         runId: "r1",
@@ -193,7 +218,10 @@ describe("AG-UI HTTP handler", () => {
   });
 
   it("rejects messages with only system role with 400", async () => {
+    // Use an approved device token
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
     const req = createReq({
+      headers: { authorization: `Bearer ${token}` },
       body: {
         threadId: "t1",
         runId: "r1",
@@ -206,7 +234,9 @@ describe("AG-UI HTTP handler", () => {
   });
 
   it("accepts tool-only messages (tool result submission)", async () => {
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
     const req = createReq({
+      headers: { authorization: `Bearer ${token}` },
       body: {
         threadId: "t-tool-only",
         runId: "r-tool-only",
@@ -226,7 +256,9 @@ describe("AG-UI HTTP handler", () => {
   });
 
   it("emits RUN_STARTED as first SSE event", async () => {
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
     const req = createReq({
+      headers: { authorization: `Bearer ${token}` },
       body: {
         threadId: "t1",
         runId: "r1",
@@ -244,7 +276,9 @@ describe("AG-UI HTTP handler", () => {
   });
 
   it("emits RUN_FINISHED after dispatch completes", async () => {
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
     const req = createReq({
+      headers: { authorization: `Bearer ${token}` },
       body: {
         threadId: "t1",
         runId: "r1",
@@ -261,7 +295,9 @@ describe("AG-UI HTTP handler", () => {
   });
 
   it("calls dispatchReplyFromConfig with correct sessionKey and runId", async () => {
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
     const req = createReq({
+      headers: { authorization: `Bearer ${token}` },
       body: {
         threadId: "t1",
         runId: "r1",
@@ -289,7 +325,9 @@ describe("AG-UI HTTP handler", () => {
       },
     );
 
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
     const req = createReq({
+      headers: { authorization: `Bearer ${token}` },
       body: {
         threadId: "t1",
         runId: "r1",
@@ -320,7 +358,9 @@ describe("AG-UI HTTP handler", () => {
       },
     );
 
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
     const req = createReq({
+      headers: { authorization: `Bearer ${token}` },
       body: {
         threadId: "t1",
         runId: "r1",
@@ -342,7 +382,9 @@ describe("AG-UI HTTP handler", () => {
       new Error("agent failed"),
     );
 
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
     const req = createReq({
+      headers: { authorization: `Bearer ${token}` },
       body: {
         threadId: "t1",
         runId: "r1",
@@ -375,7 +417,9 @@ describe("AG-UI HTTP handler", () => {
       },
     );
 
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
     const req = createReq({
+      headers: { authorization: `Bearer ${token}` },
       body: {
         threadId: "t-ct",
         runId: "r-ct",
@@ -396,7 +440,9 @@ describe("AG-UI HTTP handler", () => {
   });
 
   it("includes tool messages in conversation context for new run", async () => {
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
     const req = createReq({
+      headers: { authorization: `Bearer ${token}` },
       body: {
         threadId: "t-resume",
         runId: "r-resume",
@@ -426,7 +472,9 @@ describe("AG-UI HTTP handler", () => {
       },
     );
 
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
     const req = createReq({
+      headers: { authorization: `Bearer ${token}` },
       body: {
         threadId: "t1",
         runId: "r1",
@@ -441,5 +489,113 @@ describe("AG-UI HTTP handler", () => {
 
     expect(capturedAbortSignal).toBeDefined();
     expect(capturedAbortSignal!.aborted).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Device Pairing Tests
+// ---------------------------------------------------------------------------
+
+describe("Device pairing", () => {
+  let fakeApi: ReturnType<typeof createFakeApi>;
+  let handler: (req: IncomingMessage, res: ServerResponse) => Promise<void>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.OPENCLAW_GATEWAY_TOKEN = GATEWAY_SECRET;
+  });
+
+  it("returns pairing_pending with pairingCode and token when no auth header", async () => {
+    fakeApi = createFakeApi([]);
+    handler = createAguiHttpHandler(fakeApi as any);
+
+    const req = createReq({
+      headers: {}, // No authorization header
+      body: {},
+    });
+    const res = createRes();
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(403);
+    const body = JSON.parse(res._chunks[0]);
+    expect(body.error.type).toBe("pairing_pending");
+    expect(body.error.pairing.pairingCode).toBe("TEST1234");
+    expect(body.error.pairing.token).toBeDefined();
+    expect(body.error.pairing.instructions).toContain("openclaw pairing approve clawg-ui");
+  });
+
+  it("calls upsertPairingRequest when initiating pairing", async () => {
+    fakeApi = createFakeApi([]);
+    handler = createAguiHttpHandler(fakeApi as any);
+
+    const req = createReq({
+      headers: {}, // No authorization header
+      body: {},
+    });
+    const res = createRes();
+    await handler(req, res);
+
+    const rt = (fakeApi as any).runtime;
+    expect(rt.channel.pairing.upsertPairingRequest).toHaveBeenCalledTimes(1);
+    expect(rt.channel.pairing.upsertPairingRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: "clawg-ui",
+      }),
+    );
+  });
+
+  it("rejects invalid HMAC signature with 401", async () => {
+    fakeApi = createFakeApi([]);
+    handler = createAguiHttpHandler(fakeApi as any);
+
+    // Token with invalid signature
+    const req = createReq({
+      headers: { authorization: "Bearer aW52YWxpZC1kZXZpY2UtaWQ.invalidsignature" },
+      body: { messages: [{ role: "user", content: "hi" }] },
+    });
+    const res = createRes();
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("returns pairing_pending for valid token but unapproved device", async () => {
+    // No approved devices
+    fakeApi = createFakeApi([]);
+    handler = createAguiHttpHandler(fakeApi as any);
+
+    // Create valid HMAC token for a device that's not approved
+    const unapprovedDeviceId = "87654321-4321-4321-4321-abcdef123456";
+    const token = createDeviceToken(GATEWAY_SECRET, unapprovedDeviceId);
+
+    const req = createReq({
+      headers: { authorization: `Bearer ${token}` },
+      body: { messages: [{ role: "user", content: "hi" }] },
+    });
+    const res = createRes();
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(403);
+    const body = JSON.parse(res._chunks[0]);
+    expect(body.error.type).toBe("pairing_pending");
+    expect(body.error.message).toContain("pending approval");
+  });
+
+  it("proceeds normally for valid token with approved device", async () => {
+    fakeApi = createFakeApi([APPROVED_DEVICE_ID]);
+    handler = createAguiHttpHandler(fakeApi as any);
+
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
+
+    const req = createReq({
+      headers: { authorization: `Bearer ${token}` },
+      body: { messages: [{ role: "user", content: "Hello" }] },
+    });
+    const res = createRes();
+    await handler(req, res);
+
+    const events = parseEvents(res._chunks);
+    expect(events[0]?.type).toBe(EventType.RUN_STARTED);
+    expect(events.some((e) => e.type === EventType.RUN_FINISHED)).toBe(true);
   });
 });

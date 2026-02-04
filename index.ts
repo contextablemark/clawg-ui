@@ -1,4 +1,5 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
+import type { Command } from "commander";
 import { emptyPluginConfigSchema } from "openclaw/plugin-sdk";
 import { randomUUID } from "node:crypto";
 import { EventType } from "@ag-ui/core";
@@ -82,6 +83,31 @@ const plugin = {
         });
       }
     });
+
+    // CLI commands for device management
+    api.registerCli(
+      ({ program }: { program: Command }) => {
+        const clawgUi = program
+          .command("clawg-ui")
+          .description("CLAWG-UI (AG-UI) channel commands");
+
+        clawgUi
+          .command("devices")
+          .description("List approved devices")
+          .action(async () => {
+            const devices = await api.runtime.channel.pairing.readAllowFromStore("clawg-ui");
+            if (devices.length === 0) {
+              console.log("No approved devices.");
+              return;
+            }
+            console.log("Approved devices:");
+            for (const deviceId of devices) {
+              console.log(`  ${deviceId}`);
+            }
+          });
+      },
+      { commands: ["clawg-ui"] },
+    );
   },
 };
 

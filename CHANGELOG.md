@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.0 (2026-02-04)
+
+### Added
+- **Device pairing authentication** - Secure per-device access control
+  - HMAC-signed device tokens (no master token exposure)
+  - Pairing approval workflow (`openclaw pairing approve clawg-ui <code>`)
+  - New CLI command: `openclaw clawg-ui devices` - List approved devices
+
+### Changed
+- **Breaking:** Direct bearer token authentication using `OPENCLAW_GATEWAY_TOKEN` is now deprecated and no longer supported. All clients must use device pairing.
+
+### Security
+- Device tokens are HMAC-signed and do not expose the gateway's master secret
+- Pending pairing requests expire after 10 minutes (max 3 per channel)
+- Each device requires explicit approval by the gateway owner
+
 ## 0.1.1 (2026-02-03)
 
 ### Changed

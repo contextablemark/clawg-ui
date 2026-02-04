@@ -30,4 +30,8 @@ export const aguiChannelPlugin: ChannelPlugin<ResolvedAguiAccount> = {
     }),
     defaultAccountId: () => "default",
   },
+  pairing: {
+    idLabel: "clawgUiDeviceId",
+    normalizeAllowEntry: (entry: string) => entry.replace(/^clawg-ui:/i, "").toLowerCase(),
+  },
 };
