@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1 (2026-02-05)
+
+### Fixed
+- Return HTTP 429 `rate_limit` error when max pending pairing requests (3) is reached, instead of returning an empty pairing code
+
 ## 0.2.0 (2026-02-04)
 
 ### Added
@@ -13,7 +18,7 @@
 
 ### Security
 - Device tokens are HMAC-signed and do not expose the gateway's master secret
-- Pending pairing requests expire after 10 minutes (max 3 per channel)
+- Pending pairing requests expire after 1 hour (max 3 per channel)
 - Each device requires explicit approval by the gateway owner
 
 ## 0.1.1 (2026-02-03)
