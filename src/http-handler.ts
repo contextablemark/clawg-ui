@@ -240,6 +240,17 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
         pairingAdapter: aguiChannelPlugin.pairing,
       });
 
+      // Rate limit reached - max pending requests exceeded
+      if (!pairingCode) {
+        sendJson(res, 429, {
+          error: {
+            type: "rate_limit",
+            message: "Too many pending pairing requests. Please wait for existing requests to expire (10 minutes) or ask the owner to approve/reject them.",
+          },
+        });
+        return;
+      }
+
       // Generate signed device token
       const deviceToken = createDeviceToken(gatewaySecret, deviceId);
 

@@ -123,14 +123,19 @@ function createDeviceToken(secret: string, deviceId: string): string {
 // Fake plugin API + runtime
 // ---------------------------------------------------------------------------
 
-function createFakeApi(approvedDevices: string[] = []) {
+function createFakeApi(
+  approvedDevices: string[] = [],
+  options: { pairingCode?: string } = {},
+) {
+  const { pairingCode = "TEST1234" } = options;
+
   const dispatchReplyFromConfig = vi.fn().mockResolvedValue({
     queuedFinal: true,
     counts: { tool: 0, block: 0, final: 1 },
   });
 
   const upsertPairingRequest = vi.fn().mockResolvedValue({
-    code: "TEST1234",
+    code: pairingCode,
   });
 
   const readAllowFromStore = vi.fn().mockResolvedValue(approvedDevices);
@@ -597,5 +602,23 @@ describe("Device pairing", () => {
     const events = parseEvents(res._chunks);
     expect(events[0]?.type).toBe(EventType.RUN_STARTED);
     expect(events.some((e) => e.type === EventType.RUN_FINISHED)).toBe(true);
+  });
+
+  it("returns 429 rate_limit when max pending pairing requests reached", async () => {
+    // Simulate rate limit by returning empty code
+    fakeApi = createFakeApi([], { pairingCode: "" });
+    handler = createAguiHttpHandler(fakeApi as any);
+
+    const req = createReq({
+      headers: {}, // No authorization header - initiates pairing
+      body: { messages: [{ role: "user", content: "hi" }] },
+    });
+    const res = createRes();
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(429);
+    const body = JSON.parse(res._chunks[0]);
+    expect(body.error.type).toBe("rate_limit");
+    expect(body.error.message).toContain("Too many pending pairing requests");
   });
 });
