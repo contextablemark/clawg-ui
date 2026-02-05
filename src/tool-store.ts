@@ -1,6 +1,6 @@
 import type { Tool } from "@ag-ui/core";
 
-export type EventWriter = (event: Record<string, unknown>) => void;
+export type EventWriter = (event: { type: string } & Record<string, unknown>) => void;
 
 /**
  * Per-session store for:
@@ -15,27 +15,44 @@ const writerStore = new Map<string, EventWriter>();
 // --- Client tools (for the plugin tool factory) ---
 
 export function stashTools(sessionKey: string, tools: Tool[]): void {
+  console.log(`[clawg-ui] stashTools: sessionKey=${sessionKey}, toolCount=${tools.length}`);
+  for (const t of tools) {
+    console.log(`[clawg-ui]   tool: name=${t.name}, description=${t.description ?? "(none)"}, hasParams=${!!t.parameters}, params=${JSON.stringify(t.parameters ?? {})}`);
+  }
   toolStore.set(sessionKey, tools);
 }
 
 export function popTools(sessionKey: string): Tool[] {
   const tools = toolStore.get(sessionKey) ?? [];
+  console.log(`[clawg-ui] popTools: sessionKey=${sessionKey}, tools=${tools.length}`);
   toolStore.delete(sessionKey);
   return tools;
 }
 
 // --- SSE event writer (for before/after_tool_call hooks) ---
 
-export function setWriter(sessionKey: string, writer: EventWriter): void {
+const messageIdStore = new Map<string, string>();
+
+export function setWriter(
+  sessionKey: string,
+  writer: EventWriter,
+  messageId: string,
+): void {
   writerStore.set(sessionKey, writer);
+  messageIdStore.set(sessionKey, messageId);
 }
 
 export function getWriter(sessionKey: string): EventWriter | undefined {
   return writerStore.get(sessionKey);
 }
 
+export function getMessageId(sessionKey: string): string | undefined {
+  return messageIdStore.get(sessionKey);
+}
+
 export function clearWriter(sessionKey: string): void {
   writerStore.delete(sessionKey);
+  messageIdStore.delete(sessionKey);
 }
 
 // --- Pending toolCallId stack (before_tool_call pushes, tool_result_persist pops) ---
@@ -51,11 +68,13 @@ export function pushToolCallId(sessionKey: string, toolCallId: string): void {
     pendingStacks.set(sessionKey, stack);
   }
   stack.push(toolCallId);
+  console.log(`[clawg-ui] pushToolCallId: sessionKey=${sessionKey}, toolCallId=${toolCallId}, stackSize=${stack.length}`);
 }
 
 export function popToolCallId(sessionKey: string): string | undefined {
   const stack = pendingStacks.get(sessionKey);
   const id = stack?.pop();
+  console.log(`[clawg-ui] popToolCallId: sessionKey=${sessionKey}, toolCallId=${id ?? "none"}, stackSize=${stack?.length ?? 0}`);
   if (stack && stack.length === 0) {
     pendingStacks.delete(sessionKey);
   }
@@ -71,6 +90,7 @@ export function markClientToolNames(
   sessionKey: string,
   names: string[],
 ): void {
+  console.log(`[clawg-ui] markClientToolNames: sessionKey=${sessionKey}, names=${names.join(", ")}`);
   clientToolNames.set(sessionKey, new Set(names));
 }
 
@@ -78,10 +98,13 @@ export function isClientTool(
   sessionKey: string,
   toolName: string,
 ): boolean {
-  return clientToolNames.get(sessionKey)?.has(toolName) ?? false;
+  const result = clientToolNames.get(sessionKey)?.has(toolName) ?? false;
+  console.log(`[clawg-ui] isClientTool: sessionKey=${sessionKey}, toolName=${toolName}, result=${result}`);
+  return result;
 }
 
 export function clearClientToolNames(sessionKey: string): void {
+  console.log(`[clawg-ui] clearClientToolNames: sessionKey=${sessionKey}`);
   clientToolNames.delete(sessionKey);
 }
 
@@ -92,13 +115,17 @@ export function clearClientToolNames(sessionKey: string): void {
 const clientToolCalledFlags = new Map<string, boolean>();
 
 export function setClientToolCalled(sessionKey: string): void {
+  console.log(`[clawg-ui] setClientToolCalled: sessionKey=${sessionKey}`);
   clientToolCalledFlags.set(sessionKey, true);
 }
 
 export function wasClientToolCalled(sessionKey: string): boolean {
-  return clientToolCalledFlags.get(sessionKey) ?? false;
+  const result = clientToolCalledFlags.get(sessionKey) ?? false;
+  console.log(`[clawg-ui] wasClientToolCalled: sessionKey=${sessionKey}, result=${result}`);
+  return result;
 }
 
 export function clearClientToolCalled(sessionKey: string): void {
+  console.log(`[clawg-ui] clearClientToolCalled: sessionKey=${sessionKey}`);
   clientToolCalledFlags.delete(sessionKey);
 }

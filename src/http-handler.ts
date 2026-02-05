@@ -408,7 +408,7 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
     }
 
     // Register SSE writer so before/after_tool_call hooks can emit AG-UI events
-    setWriter(sessionKey, writeEvent);
+    setWriter(sessionKey, writeEvent, messageId);
     const storePath = runtime.channel.session.resolveStorePath(cfg.session?.store, {
       agentId: route.agentId,
     });
