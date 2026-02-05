@@ -6,7 +6,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/contextable/clawg-ui"
+    "url": "git+https://github.com/contextable/clawg-ui.git"
   },
   "keywords": [
     "openclaw",
