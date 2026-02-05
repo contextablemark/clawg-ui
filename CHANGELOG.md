@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.2 (2026-02-05)
+
+### Fixed
+- Include `messageId` in `TOOL_CALL_RESULT` events as required by AG-UI client v0.0.43 Zod schema
+
+### Added
+- Debug logging throughout tool call flow for easier troubleshooting
+
 ## 0.2.1 (2026-02-05)
 
 ### Fixed
