@@ -349,7 +349,7 @@ describe("AG-UI HTTP handler", () => {
     const contentEvt = events.find(
       (e) => e.type === EventType.TEXT_MESSAGE_CONTENT,
     );
-    expect(contentEvt?.delta).toBe("Hello from agent");
+    expect(contentEvt?.delta).toBe("Hello from agent\n\n");
   });
 
   it("sendToolResult does not crash and stream completes (tool events come from hooks)", async () => {

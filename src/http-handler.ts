@@ -12,10 +12,6 @@ import {
   wasClientToolCalled,
   clearClientToolCalled,
   clearClientToolNames,
-  hasToolCallEnded,
-  clearToolCallEnded,
-  setThreadId,
-  clearThreadId,
 } from "./tool-store.js";
 import { aguiChannelPlugin } from "./channel.js";
 
@@ -375,7 +371,6 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
     let currentMessageId = `msg-${randomUUID()}`;
     let messageStarted = false;
     let currentRunId = runId;
-    let lastChunkEndChar = ""; // Track last char for space insertion between chunks
 
     const writeEvent = (event: { type: EventType } & Record<string, unknown>) => {
       if (closed) {
@@ -415,7 +410,6 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
 
     // Register SSE writer so before/after_tool_call hooks can emit AG-UI events
     setWriter(sessionKey, writeEvent, currentMessageId);
-    setThreadId(sessionKey, threadId);
     const storePath = runtime.channel.session.resolveStorePath(cfg.session?.store, {
       agentId: route.agentId,
     });
@@ -481,29 +475,6 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
           return false;
         }
 
-        // If text arrives after a tool call ended, start a new run (CopilotKit requirement)
-        if (hasToolCallEnded(sessionKey)) {
-          console.log(`[clawg-ui] sendBlockReply: text after tool call, starting new run`);
-          // End current run
-          writeEvent({
-            type: EventType.RUN_FINISHED,
-            threadId,
-            runId: currentRunId,
-          });
-          // Start new run for text with new runId and messageId
-          currentRunId = `clawg-ui-run-${randomUUID()}`;
-          currentMessageId = `msg-${randomUUID()}`;
-          writeEvent({
-            type: EventType.RUN_STARTED,
-            threadId,
-            runId: currentRunId,
-          });
-          clearToolCallEnded(sessionKey);
-          // Reset message state for new run
-          messageStarted = false;
-          lastChunkEndChar = "";
-        }
-
         if (!messageStarted) {
           messageStarted = true;
           writeEvent({
@@ -514,19 +485,12 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
           });
         }
 
-        // OpenClaw's chunker breaks at word boundaries but loses the space.
-        // Add a space if previous chunk ended with word char and this starts with word char.
-        let delta = text;
-        if (lastChunkEndChar && /\w/.test(lastChunkEndChar) && /^\w/.test(text)) {
-          delta = " " + text;
-        }
-        lastChunkEndChar = text.slice(-1);
-
+        // Join chunks with \n\n (breakPreference: paragraph uses double-newline joiner)
         writeEvent({
           type: EventType.TEXT_MESSAGE_CONTENT,
           messageId: currentMessageId,
           runId: currentRunId,
-          delta,
+          delta: text + "\n\n",
         });
         return true;
       },
@@ -535,29 +499,6 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
           return false;
         }
         const text = wasClientToolCalled(sessionKey) ? "" : payload.text?.trim();
-
-        // If text arrives after a tool call ended, start a new run (CopilotKit requirement)
-        if (text && hasToolCallEnded(sessionKey)) {
-          console.log(`[clawg-ui] sendFinalReply: text after tool call, starting new run`);
-          // End current run
-          writeEvent({
-            type: EventType.RUN_FINISHED,
-            threadId,
-            runId: currentRunId,
-          });
-          // Start new run for text with new runId and messageId
-          currentRunId = `clawg-ui-run-${randomUUID()}`;
-          currentMessageId = `msg-${randomUUID()}`;
-          writeEvent({
-            type: EventType.RUN_STARTED,
-            threadId,
-            runId: currentRunId,
-          });
-          clearToolCallEnded(sessionKey);
-          // Reset message state for new run
-          messageStarted = false;
-          lastChunkEndChar = "";
-        }
 
         if (text) {
           if (!messageStarted) {
@@ -569,16 +510,12 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
               role: "assistant",
             });
           }
-          // Add space if needed (same logic as sendBlockReply)
-          let delta = text;
-          if (lastChunkEndChar && /\w/.test(lastChunkEndChar) && /^\w/.test(text)) {
-            delta = " " + text;
-          }
+          // Join chunks with \n\n (breakPreference: paragraph uses double-newline joiner)
           writeEvent({
             type: EventType.TEXT_MESSAGE_CONTENT,
             messageId: currentMessageId,
             runId: currentRunId,
-            delta,
+            delta: text + "\n\n",
           });
         }
         // End the message and run
@@ -649,8 +586,6 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
       clearWriter(sessionKey);
       clearClientToolCalled(sessionKey);
       clearClientToolNames(sessionKey);
-      clearToolCallEnded(sessionKey);
-      clearThreadId(sessionKey);
     }
   };
 }

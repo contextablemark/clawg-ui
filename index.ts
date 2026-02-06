@@ -13,7 +13,6 @@ import {
   popToolCallId,
   isClientTool,
   setClientToolCalled,
-  setToolCallEnded,
 } from "./src/tool-store.js";
 
 const plugin = {
@@ -68,7 +67,6 @@ const plugin = {
           type: EventType.TOOL_CALL_END,
           toolCallId,
         });
-        setToolCallEnded(sk);
         setClientToolCalled(sk);
       } else {
         // Server tool: push ID so tool_result_persist can emit
@@ -103,7 +101,6 @@ const plugin = {
           type: EventType.TOOL_CALL_END,
           toolCallId,
         });
-        setToolCallEnded(sk);
       }
     });
 
