@@ -129,3 +129,41 @@ export function clearClientToolCalled(sessionKey: string): void {
   console.log(`[clawg-ui] clearClientToolCalled: sessionKey=${sessionKey}`);
   clientToolCalledFlags.delete(sessionKey);
 }
+
+// --- Tool call ended flag ---
+// Set when TOOL_CALL_END is emitted. When text arrives after this flag is set,
+// we need to end the current run and start a new run for text (CopilotKit requirement).
+
+const toolCallEndedFlags = new Map<string, boolean>();
+
+export function setToolCallEnded(sessionKey: string): void {
+  console.log(`[clawg-ui] setToolCallEnded: sessionKey=${sessionKey}`);
+  toolCallEndedFlags.set(sessionKey, true);
+}
+
+export function hasToolCallEnded(sessionKey: string): boolean {
+  const result = toolCallEndedFlags.get(sessionKey) ?? false;
+  console.log(`[clawg-ui] hasToolCallEnded: sessionKey=${sessionKey}, result=${result}`);
+  return result;
+}
+
+export function clearToolCallEnded(sessionKey: string): void {
+  console.log(`[clawg-ui] clearToolCallEnded: sessionKey=${sessionKey}`);
+  toolCallEndedFlags.delete(sessionKey);
+}
+
+// --- Session info (threadId for multi-run support) ---
+
+const sessionThreadIds = new Map<string, string>();
+
+export function setThreadId(sessionKey: string, threadId: string): void {
+  sessionThreadIds.set(sessionKey, threadId);
+}
+
+export function getThreadId(sessionKey: string): string | undefined {
+  return sessionThreadIds.get(sessionKey);
+}
+
+export function clearThreadId(sessionKey: string): void {
+  sessionThreadIds.delete(sessionKey);
+}

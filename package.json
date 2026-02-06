@@ -39,7 +39,11 @@
       "docsPath": "/channels/clawg-ui",
       "docsLabel": "clawg-ui",
       "blurb": "AG-UI protocol endpoint for CopilotKit and HttpAgent clients.",
-      "order": 90
+      "order": 90,
+      "defaults": {
+        "blockStreaming": true,
+        "chunkMode": "newline"
+      }
     },
     "install": {
       "npmSpec": "@contextableai/clawg-ui",
