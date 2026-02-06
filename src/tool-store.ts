@@ -108,6 +108,26 @@ export function clearClientToolNames(sessionKey: string): void {
   clientToolNames.delete(sessionKey);
 }
 
+// --- Tool-fired-in-run flag ---
+// Tracks whether any tool call (server or client) was emitted in the current
+// run. When a text message is about to be emitted and this flag is set, the
+// http-handler splits into a new run so tool events and text events live in
+// separate runs (per AG-UI protocol best practice).
+
+const toolFiredInRunFlags = new Map<string, boolean>();
+
+export function setToolFiredInRun(sessionKey: string): void {
+  toolFiredInRunFlags.set(sessionKey, true);
+}
+
+export function wasToolFiredInRun(sessionKey: string): boolean {
+  return toolFiredInRunFlags.get(sessionKey) ?? false;
+}
+
+export function clearToolFiredInRun(sessionKey: string): void {
+  toolFiredInRunFlags.delete(sessionKey);
+}
+
 // --- Client-tool-called flag ---
 // Set when a client tool is invoked during a run so the dispatcher can
 // suppress text output and end the run after the tool call events.

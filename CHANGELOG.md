@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.4 (2026-02-06)
+
+### Changed
+- Separate tool call events and text message events into distinct AG-UI runs — when text follows a tool call, the tool run is finished and a new run (with a unique runId) is started for the text messages
+
 ## 0.2.3 (2026-02-06)
 
 ### Fixed
