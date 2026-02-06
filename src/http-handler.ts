@@ -368,8 +368,9 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
     res.flushHeaders?.();
 
     let closed = false;
-    const messageId = `msg-${randomUUID()}`;
+    let currentMessageId = `msg-${randomUUID()}`;
     let messageStarted = false;
+    let currentRunId = runId;
 
     const writeEvent = (event: { type: EventType } & Record<string, unknown>) => {
       if (closed) {
@@ -408,7 +409,7 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
     }
 
     // Register SSE writer so before/after_tool_call hooks can emit AG-UI events
-    setWriter(sessionKey, writeEvent, messageId);
+    setWriter(sessionKey, writeEvent, currentMessageId);
     const storePath = runtime.channel.session.resolveStorePath(cfg.session?.store, {
       agentId: route.agentId,
     });
@@ -473,18 +474,23 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
         if (!text) {
           return false;
         }
+
         if (!messageStarted) {
           messageStarted = true;
           writeEvent({
             type: EventType.TEXT_MESSAGE_START,
-            messageId,
+            messageId: currentMessageId,
+            runId: currentRunId,
             role: "assistant",
           });
         }
+
+        // Join chunks with \n\n (breakPreference: paragraph uses double-newline joiner)
         writeEvent({
           type: EventType.TEXT_MESSAGE_CONTENT,
-          messageId,
-          delta: text,
+          messageId: currentMessageId,
+          runId: currentRunId,
+          delta: text + "\n\n",
         });
         return true;
       },
@@ -493,32 +499,37 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
           return false;
         }
         const text = wasClientToolCalled(sessionKey) ? "" : payload.text?.trim();
+
         if (text) {
           if (!messageStarted) {
             messageStarted = true;
             writeEvent({
               type: EventType.TEXT_MESSAGE_START,
-              messageId,
+              messageId: currentMessageId,
+              runId: currentRunId,
               role: "assistant",
             });
           }
+          // Join chunks with \n\n (breakPreference: paragraph uses double-newline joiner)
           writeEvent({
             type: EventType.TEXT_MESSAGE_CONTENT,
-            messageId,
-            delta: text,
+            messageId: currentMessageId,
+            runId: currentRunId,
+            delta: text + "\n\n",
           });
         }
         // End the message and run
         if (messageStarted) {
           writeEvent({
             type: EventType.TEXT_MESSAGE_END,
-            messageId,
+            messageId: currentMessageId,
+            runId: currentRunId,
           });
         }
         writeEvent({
           type: EventType.RUN_FINISHED,
           threadId,
-          runId,
+          runId: currentRunId,
         });
         closed = true;
         res.end();
@@ -550,13 +561,14 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
         if (messageStarted) {
           writeEvent({
             type: EventType.TEXT_MESSAGE_END,
-            messageId,
+            messageId: currentMessageId,
+            runId: currentRunId,
           });
         }
         writeEvent({
           type: EventType.RUN_FINISHED,
           threadId,
-          runId,
+          runId: currentRunId,
         });
         closed = true;
         res.end();

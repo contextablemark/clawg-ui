@@ -129,3 +129,4 @@ export function clearClientToolCalled(sessionKey: string): void {
   console.log(`[clawg-ui] clearClientToolCalled: sessionKey=${sessionKey}`);
   clientToolCalledFlags.delete(sessionKey);
 }
+

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.3 (2026-02-06)
+
+### Fixed
+- Append `\n\n` paragraph joiner to streamed text deltas so chunks render with proper spacing
+- Include `runId` in all `TEXT_MESSAGE_START`, `TEXT_MESSAGE_CONTENT`, and `TEXT_MESSAGE_END` events for AG-UI protocol compliance
+
+### Changed
+- Set channel defaults to `blockStreaming: true` and `chunkMode: "newline"` for correct paragraph-based streaming out of the box
+- Clean up multi-run logic for tool-call-then-text flows (single run per request)
+
 ## 0.2.2 (2026-02-05)
 
 ### Fixed
