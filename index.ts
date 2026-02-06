@@ -13,6 +13,7 @@ import {
   popToolCallId,
   isClientTool,
   setClientToolCalled,
+  setToolFiredInRun,
 } from "./src/tool-store.js";
 
 const plugin = {
@@ -50,6 +51,7 @@ const plugin = {
         toolCallId,
         toolCallName: event.toolName,
       });
+      setToolFiredInRun(sk);
       if (event.params && Object.keys(event.params).length > 0) {
         console.log(`[clawg-ui] before_tool_call: emitting TOOL_CALL_ARGS, params=${JSON.stringify(event.params)}`);
         writer({
