@@ -194,11 +194,11 @@ describe("AG-UI HTTP handler", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Set env token before handler creation so the factory can resolve it
+    process.env.OPENCLAW_GATEWAY_TOKEN = GATEWAY_SECRET;
     // Create fake API with the approved device
     fakeApi = createFakeApi([APPROVED_DEVICE_ID]);
     handler = createAguiHttpHandler(fakeApi as any);
-    // Set env token for auth fallback
-    process.env.OPENCLAW_GATEWAY_TOKEN = GATEWAY_SECRET;
   });
 
   it("rejects non-POST with 405", async () => {
