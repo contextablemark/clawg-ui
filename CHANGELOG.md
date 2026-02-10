@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.5 (2026-02-10)
+
+### Fixed
+- Resolve gateway secret at factory initialization time instead of per-request to eliminate plugin security scanner warning ("Environment variable access combined with network send")
+
 ## 0.2.4 (2026-02-06)
 
 ### Changed
