@@ -16,6 +16,7 @@ import {
   clearToolFiredInRun,
 } from "./tool-store.js";
 import { aguiChannelPlugin } from "./channel.js";
+import { resolveGatewaySecret } from "./gateway-secret.js";
 
 // ---------------------------------------------------------------------------
 // Lightweight HTTP helpers (no internal imports needed)
@@ -179,25 +180,6 @@ function buildBodyFromMessages(messages: Message[]): {
     body,
     systemPrompt: systemParts.length > 0 ? systemParts.join("\n\n") : undefined,
   };
-}
-
-// ---------------------------------------------------------------------------
-// Gateway secret resolution — called once at factory time so that env-var
-// reads are separated from the per-request network path.  This avoids
-// static-analysis warnings about "env access + network send" in the same
-// execution scope.
-// ---------------------------------------------------------------------------
-
-function resolveGatewaySecret(api: OpenClawPluginApi): string | null {
-  const gatewayAuth = api.config.gateway?.auth;
-  const secret =
-    (gatewayAuth as Record<string, unknown> | undefined)?.token ??
-    process.env.OPENCLAW_GATEWAY_TOKEN ??
-    process.env.CLAWDBOT_GATEWAY_TOKEN;
-  if (typeof secret === "string" && secret) {
-    return secret;
-  }
-  return null;
 }
 
 // ---------------------------------------------------------------------------

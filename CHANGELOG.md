@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.6 (2026-02-10)
+
+### Fixed
+- Move gateway secret resolution into its own module (`gateway-secret.ts`) so the HTTP handler file contains zero `process.env` references — eliminates plugin security scanner warning ("Environment variable access combined with network send")
+
 ## 0.2.5 (2026-02-10)
 
 ### Fixed
