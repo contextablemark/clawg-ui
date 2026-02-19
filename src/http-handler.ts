@@ -380,6 +380,15 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
       if (!wasToolFiredInRun(sessionKey)) {
         return;
       }
+      // Close any open text message before ending the run
+      if (messageStarted) {
+        writeEvent({
+          type: EventType.TEXT_MESSAGE_END,
+          messageId: currentMessageId,
+          runId: currentRunId,
+        });
+        messageStarted = false;
+      }
       // End the tool run
       writeEvent({
         type: EventType.RUN_FINISHED,

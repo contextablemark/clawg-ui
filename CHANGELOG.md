@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.7 (2026-02-18)
+
+### Fixed
+- Close open text messages before emitting `RUN_FINISHED` in `splitRunIfToolFired()` — fixes `AGUIError: Cannot send 'RUN_FINISHED' while text messages are still active` when text streaming is followed by a server-side tool call and then more text
+
 ## 0.2.6 (2026-02-10)
 
 ### Fixed
