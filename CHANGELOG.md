@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.8 (2026-02-26)
+
+### Fixed
+- Remove literal `process.env` from a code comment in `http-handler.ts` that was itself triggering the security scanner — the comment documenting the v0.2.5/v0.2.6 fix contained the exact pattern the scanner flags
+
 ## 0.2.7 (2026-02-18)
 
 ### Fixed
