@@ -189,7 +189,7 @@ function buildBodyFromMessages(messages: Message[]): {
 export function createAguiHttpHandler(api: OpenClawPluginApi) {
   const runtime: PluginRuntime = api.runtime;
 
-  // Resolve once at init so the per-request handler never touches process.env.
+  // Resolve once at init so the per-request handler never touches env vars.
   const gatewaySecret = resolveGatewaySecret(api);
 
   return async function handleAguiRequest(
