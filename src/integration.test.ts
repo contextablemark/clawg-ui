@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll } from "vitest";
+import { createHmac, randomUUID } from "node:crypto";
 import { EventType } from "@ag-ui/core";
 
 // ---------------------------------------------------------------------------
@@ -7,7 +8,27 @@ import { EventType } from "@ag-ui/core";
 
 const serverUrl = process.env.OPENCLAW_SERVER_URL;
 const baseUrl = serverUrl ? `${serverUrl}:18789/v1/clawg-ui` : "";
-const token = process.env.OPENCLAW_GATEWAY_TOKEN ?? "";
+
+// Accept either a pre-built device token or auto-generate one from the
+// gateway token + an approved device ID.
+const gatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN ?? "";
+const deviceToken = process.env.CLAWG_UI_DEVICE_TOKEN ?? "";
+const approvedDeviceId = process.env.CLAWG_UI_DEVICE_ID ?? "";
+
+function buildDeviceToken(secret: string, deviceId: string): string {
+  const encodedId = Buffer.from(deviceId).toString("base64url");
+  const signature = createHmac("sha256", secret)
+    .update(deviceId)
+    .digest("hex")
+    .slice(0, 32);
+  return `${encodedId}.${signature}`;
+}
+
+// Resolve the token: explicit device token > auto-generated from gateway secret + device ID
+const token = deviceToken
+  || (gatewayToken && approvedDeviceId
+    ? buildDeviceToken(gatewayToken, approvedDeviceId)
+    : "");
 
 const describeIntegration = serverUrl ? describe : describe.skip;
 
@@ -64,7 +85,7 @@ describeIntegration("clawg-ui integration", () => {
   beforeAll(() => {
     if (!token) {
       throw new Error(
-        "OPENCLAW_GATEWAY_TOKEN must be set for integration tests",
+        "Set CLAWG_UI_DEVICE_TOKEN, or both OPENCLAW_GATEWAY_TOKEN and CLAWG_UI_DEVICE_ID, for integration tests",
       );
     }
   });
@@ -79,7 +100,7 @@ describeIntegration("clawg-ui integration", () => {
     expect(res.status).toBe(405);
   });
 
-  it("rejects missing auth with 401", async () => {
+  it("initiates pairing when no auth header is provided (403)", async () => {
     const res = await fetch(baseUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -89,7 +110,11 @@ describeIntegration("clawg-ui integration", () => {
         messages: [{ role: "user", content: "hi" }],
       }),
     });
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error.type).toBe("pairing_pending");
+    expect(body.error.pairing.token).toBeDefined();
+    expect(body.error.pairing.pairingCode).toBeDefined();
   });
 
   it("rejects bad token with 401", async () => {
