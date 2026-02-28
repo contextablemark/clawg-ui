@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.9 (2026-02-28)
+## Unreleased
 
 ### Fixed
 - README event table was missing `TOOL_CALL_ARGS` and `TOOL_CALL_RESULT`; `tools` field incorrectly said "reserved for future use"
