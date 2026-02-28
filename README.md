@@ -47,6 +47,10 @@ AG-UI Client                        OpenClaw Gateway
     |<-------------------------------------|
     |  SSE: TOOL_CALL_START               |
     |<-------------------------------------|  (if agent uses tools)
+    |  SSE: TOOL_CALL_ARGS                |
+    |<-------------------------------------|
+    |  SSE: TOOL_CALL_RESULT              |
+    |<-------------------------------------|  (server tools only)
     |  SSE: TOOL_CALL_END                 |
     |<-------------------------------------|
     |  SSE: TEXT_MESSAGE_END              |
@@ -138,7 +142,7 @@ The endpoint accepts a POST with a JSON body matching the AG-UI `RunAgentInput` 
 | `threadId` | string | no | Conversation thread ID. Auto-generated if omitted. |
 | `runId` | string | no | Unique run ID. Auto-generated if omitted. |
 | `messages` | Message[] | yes | Array of messages. At least one `user` message required. |
-| `tools` | Tool[] | no | Client-side tool definitions (reserved for future use). |
+| `tools` | Tool[] | no | Client-side tool definitions. The agent can invoke these; see [Tool call events](#tool-call-events). |
 | `state` | object | no | Client state (reserved for future use). |
 
 ### Message format
@@ -163,9 +167,27 @@ The response is an SSE stream. Each event is a `data:` line containing a JSON ob
 | `TEXT_MESSAGE_CONTENT` | Each streamed text delta |
 | `TEXT_MESSAGE_END` | After last text chunk |
 | `TOOL_CALL_START` | Agent invokes a tool |
-| `TOOL_CALL_END` | Tool execution complete |
+| `TOOL_CALL_ARGS` | Tool call arguments (JSON delta) |
+| `TOOL_CALL_RESULT` | Server-side tool execution result |
+| `TOOL_CALL_END` | Tool call complete |
 | `RUN_FINISHED` | Agent run complete |
 | `RUN_ERROR` | On failure |
+
+### Tool call events
+
+Tool call events (`TOOL_CALL_START`, `TOOL_CALL_ARGS`, `TOOL_CALL_RESULT`, `TOOL_CALL_END`) are emitted when the OpenClaw agent invokes a tool during its run. They are emitted via OpenClaw lifecycle hooks (`before_tool_call` and `tool_result_persist`) in `index.ts`.
+
+**When do tool events appear?**
+
+- The agent must have tools available (server-side tools on the agent, or client-side tools passed via the `tools` field)
+- The agent's LLM must decide to call a tool based on the conversation
+
+**Client tools vs server tools:**
+
+- **Client tools** (passed via `tools` in the request): the stream emits `TOOL_CALL_START` → `TOOL_CALL_ARGS` → `TOOL_CALL_END`, then the run finishes. The client executes the tool locally and starts a new run with the result as a `tool` message.
+- **Server tools** (registered on the OpenClaw agent): the stream emits `TOOL_CALL_START` → `TOOL_CALL_ARGS` → `TOOL_CALL_RESULT` → `TOOL_CALL_END`. The agent continues processing in the same or a subsequent run.
+
+> **Tip:** To confirm tool calls are being triggered, check the gateway logs for `[clawg-ui] before_tool_call:` entries.
 
 ## Authentication
 
