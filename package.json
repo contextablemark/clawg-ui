@@ -17,6 +17,10 @@
     "channel-plugin"
   ],
   "main": "./dist/index.js",
+  "files": [
+    "dist",
+    "openclaw.plugin.json"
+  ],
   "scripts": {
     "build": "tsc",
     "prepublishOnly": "npm run build",
