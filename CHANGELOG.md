@@ -1,10 +1,10 @@
 # Changelog
 
-## 0.3.0 (2026-03-09)
+## 0.3.1 (2026-03-09)
 
 ### Fixed
 - Compile TypeScript to `dist/` and point `openclaw.extensions` to `./dist/index.js` instead of `./index.ts` — fixes "loaded without install/load-path provenance" warning in OpenClaw 3.7
-- Remove `auth: "plugin"` from `registerHttpRoute` call — property removed from the plugin API
+- Keep `auth: "plugin"` on `registerHttpRoute` with a type cast — required at runtime but not yet in SDK typings
 - Pass plain string `"clawg-ui"` to `readAllowFromStore` instead of `{ channel, accountId }` object — matches updated pairing API signature
 - Remove `onToolResult` from reply options — property is now explicitly omitted from the type
 - Use `EventType` enum instead of plain `string` in `EventWriter` type — fixes type mismatch with AG-UI core
