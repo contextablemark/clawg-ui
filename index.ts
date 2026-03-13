@@ -4,7 +4,7 @@ import { emptyPluginConfigSchema } from "openclaw/plugin-sdk";
 import { randomUUID } from "node:crypto";
 import { EventType } from "@ag-ui/core";
 import { aguiChannelPlugin } from "./src/channel.js";
-import { createAguiHttpHandler, createAguiInfoHandler } from "./src/http-handler.js";
+import { createAguiHttpHandler } from "./src/http-handler.js";
 import { clawgUiToolFactory } from "./src/client-tools.js";
 import {
   getWriter,
@@ -154,11 +154,6 @@ const plugin: {
       path: "/v1/clawg-ui",
       auth: "plugin",
       handler: createAguiHttpHandler(api),
-    });
-    (api.registerHttpRoute as (params: any) => void)({
-      path: "/v1/clawg-ui/info",
-      auth: "plugin",
-      handler: createAguiInfoHandler(api),
     });
 
     api.on("before_tool_call", handleBeforeToolCall);

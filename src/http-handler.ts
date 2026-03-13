@@ -28,8 +28,8 @@ function sendJson(res: ServerResponse, status: number, body: unknown) {
   res.end(JSON.stringify(body));
 }
 
-function sendMethodNotAllowed(res: ServerResponse, allow = "POST") {
-  res.setHeader("Allow", allow);
+function sendMethodNotAllowed(res: ServerResponse) {
+  res.setHeader("Allow", "POST");
   res.statusCode = 405;
   res.setHeader("Content-Type", "text/plain; charset=utf-8");
   res.end("Method Not Allowed");
@@ -301,16 +301,6 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
       sendJson(res, 400, {
         error: { message: String(err), type: "invalid_request_error" },
       });
-      return;
-    }
-
-    // CopilotKit single-transport sends { method: "info" } to the main URL
-    if (
-      body &&
-      typeof body === "object" &&
-      (body as Record<string, unknown>).method === "info"
-    ) {
-      sendJson(res, 200, buildAgentsResponse(runtime));
       return;
     }
 
@@ -641,45 +631,5 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
       clearClientToolNames(sessionKey);
       clearToolFiredInRun(sessionKey);
     }
-  };
-}
-
-// ---------------------------------------------------------------------------
-// /info handler — agent discovery for CopilotKit
-// ---------------------------------------------------------------------------
-
-function buildAgentsResponse(runtime: PluginRuntime): { agents: Record<string, { name: string; description: string }> } {
-  const cfg = runtime.config.loadConfig();
-  const agentList =
-    (cfg as Record<string, unknown> & { agents?: { list?: { id: string; name?: string }[] } })
-      .agents?.list ?? [];
-
-  const agents: Record<string, { name: string; description: string }> = {};
-  for (const agent of agentList) {
-    const name = agent.name ?? agent.id;
-    agents[agent.id] = { name, description: name };
-  }
-
-  // If no agents configured, expose a default "main" agent
-  if (Object.keys(agents).length === 0) {
-    agents["main"] = { name: "main", description: "Default agent" };
-  }
-
-  return { agents };
-}
-
-export function createAguiInfoHandler(api: OpenClawPluginApi) {
-  const runtime: PluginRuntime = api.runtime;
-
-  return async function handleAguiInfo(
-    _req: IncomingMessage,
-    res: ServerResponse,
-  ): Promise<void> {
-    if (_req.method !== "GET" && _req.method !== "POST") {
-      sendMethodNotAllowed(res, "GET, POST");
-      return;
-    }
-
-    sendJson(res, 200, buildAgentsResponse(runtime));
   };
 }

@@ -18,7 +18,7 @@ vi.mock("openclaw/plugin-sdk", () => ({
   emptyPluginConfigSchema: () => ({}),
 }));
 
-import { createAguiHttpHandler, createAguiInfoHandler } from "./http-handler.js";
+import { createAguiHttpHandler } from "./http-handler.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -262,20 +262,6 @@ describe("AG-UI HTTP handler", () => {
     ]);
     expect(events[0].threadId).toBe("t-empty");
     expect(events[0].runId).toBe("r-empty");
-  });
-
-  it("returns agent info for { method: 'info' } POST (single transport)", async () => {
-    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
-    const req = createReq({
-      headers: { authorization: `Bearer ${token}` },
-      body: { method: "info" },
-    });
-    const res = createRes();
-    await handler(req, res);
-    expect(res.statusCode).toBe(200);
-    const body = JSON.parse(res._chunks[0]);
-    expect(body.agents).toBeDefined();
-    expect(body.agents.main).toEqual({ name: "main", description: "Default agent" });
   });
 
   it("accepts tool-only messages (tool result submission)", async () => {
@@ -754,78 +740,5 @@ describe("Device pairing", () => {
     const body = JSON.parse(res._chunks[0]);
     expect(body.error.type).toBe("rate_limit");
     expect(body.error.message).toContain("Too many pending pairing requests");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// /info handler tests
-// ---------------------------------------------------------------------------
-
-describe("AG-UI /info handler", () => {
-  let handler: (req: IncomingMessage, res: ServerResponse) => Promise<void>;
-
-  it("returns default main agent when config has no agents list", async () => {
-    const fakeApi = createFakeApi([APPROVED_DEVICE_ID]);
-    handler = createAguiInfoHandler(fakeApi as any);
-
-    const req = createReq({ method: "GET" });
-    const res = createRes();
-    await handler(req, res);
-
-    expect(res.statusCode).toBe(200);
-    const body = JSON.parse(res._chunks[0]);
-    expect(body.agents).toEqual({
-      main: { name: "main", description: "Default agent" },
-    });
-  });
-
-  it("returns configured agents from config", async () => {
-    const fakeApi = createFakeApi([APPROVED_DEVICE_ID]);
-    // Override loadConfig to include agents
-    (fakeApi as any).runtime.config.loadConfig = () => ({
-      session: { store: "/tmp/test-sessions" },
-      agents: {
-        list: [
-          { id: "researcher", name: "Research Agent" },
-          { id: "coder" },
-        ],
-      },
-    });
-    handler = createAguiInfoHandler(fakeApi as any);
-
-    const req = createReq({ method: "GET" });
-    const res = createRes();
-    await handler(req, res);
-
-    expect(res.statusCode).toBe(200);
-    const body = JSON.parse(res._chunks[0]);
-    expect(body.agents).toEqual({
-      researcher: { name: "Research Agent", description: "Research Agent" },
-      coder: { name: "coder", description: "coder" },
-    });
-  });
-
-  it("accepts POST requests (single-route transport)", async () => {
-    const fakeApi = createFakeApi([APPROVED_DEVICE_ID]);
-    handler = createAguiInfoHandler(fakeApi as any);
-
-    const req = createReq({ method: "POST", body: { method: "info" } });
-    const res = createRes();
-    await handler(req, res);
-
-    expect(res.statusCode).toBe(200);
-    const body = JSON.parse(res._chunks[0]);
-    expect(body.agents).toBeDefined();
-  });
-
-  it("rejects PUT with 405", async () => {
-    const fakeApi = createFakeApi([APPROVED_DEVICE_ID]);
-    handler = createAguiInfoHandler(fakeApi as any);
-
-    const req = createReq({ method: "PUT" });
-    const res = createRes();
-    await handler(req, res);
-
-    expect(res.statusCode).toBe(405);
   });
 });

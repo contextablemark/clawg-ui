@@ -1,14 +1,11 @@
 # Changelog
 
-## 0.4.1 (2026-03-13)
+## 0.4.2 (2026-03-13)
 
-### Fixed
-- Handle `{ method: "info" }` POST on the main `/v1/clawg-ui` endpoint for CopilotKit single-transport mode — previously fell through to the empty-messages SSE path, returning SSE instead of JSON
+### Removed
+- Reverted `/v1/clawg-ui/info` endpoint and CopilotRuntime single-transport `{ method: "info" }` handling added in 0.4.0–0.4.1 — clawg-ui is a pure AG-UI endpoint; CopilotKit clients must use a CopilotRuntime intermediary with `HttpAgent` pointed at clawg-ui
 
-## 0.4.0 (2026-03-13)
-
-### Added
-- `/v1/clawg-ui/info` endpoint for AG-UI agent discovery — returns configured agents (or a default `"main"` agent) so CopilotKit and other AG-UI clients can discover available agents on connect
+## 0.3.3 (2026-03-13)
 
 ### Fixed
 - Return a valid empty SSE run (`RUN_STARTED` + `RUN_FINISHED`) instead of 400 when `messages` is empty or contains no user/tool messages — restores AG-UI protocol compliance and fixes CopilotKit integration (fixes #18)

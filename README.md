@@ -133,30 +133,9 @@ function App() {
 }
 ```
 
-## Agent discovery (`/info`)
-
-The plugin registers a `/v1/clawg-ui/info` endpoint that CopilotKit and other AG-UI clients use to discover available agents. Accepts GET or POST.
-
-```bash
-curl http://localhost:18789/v1/clawg-ui/info \
-  -H "Authorization: Bearer <device-token>"
-```
-
-Response:
-
-```json
-{
-  "agents": {
-    "main": { "name": "main", "description": "Default agent" }
-  }
-}
-```
-
-The response reflects the agents configured in OpenClaw's `agents.list` config. If no agents are configured, a default `"main"` agent is returned.
-
 ## Request format
 
-The run endpoint accepts a POST with a JSON body matching the AG-UI `RunAgentInput` schema:
+The endpoint accepts a POST with a JSON body matching the AG-UI `RunAgentInput` schema:
 
 | Field | Type | Required | Description |
 |---|---|---|---|

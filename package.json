@@ -1,6 +1,6 @@
 {
   "name": "@contextableai/clawg-ui",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "AG-UI protocol channel plugin for OpenClaw — connect CopilotKit and AG-UI clients to your OpenClaw gateway",
   "type": "module",
   "license": "MIT",
