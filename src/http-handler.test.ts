@@ -264,6 +264,20 @@ describe("AG-UI HTTP handler", () => {
     expect(events[0].runId).toBe("r-empty");
   });
 
+  it("returns agent info for { method: 'info' } POST (single transport)", async () => {
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
+    const req = createReq({
+      headers: { authorization: `Bearer ${token}` },
+      body: { method: "info" },
+    });
+    const res = createRes();
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res._chunks[0]);
+    expect(body.agents).toBeDefined();
+    expect(body.agents.main).toEqual({ name: "main", description: "Default agent" });
+  });
+
   it("accepts tool-only messages (tool result submission)", async () => {
     const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
     const req = createReq({

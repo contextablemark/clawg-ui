@@ -304,6 +304,16 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
       return;
     }
 
+    // CopilotKit single-transport sends { method: "info" } to the main URL
+    if (
+      body &&
+      typeof body === "object" &&
+      (body as Record<string, unknown>).method === "info"
+    ) {
+      sendJson(res, 200, buildAgentsResponse(runtime));
+      return;
+    }
+
     const input = body as RunAgentInput;
     const threadId = input.threadId || `clawg-ui-${randomUUID()}`;
     const runId = input.runId || `clawg-ui-run-${randomUUID()}`;
@@ -638,6 +648,26 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
 // /info handler — agent discovery for CopilotKit
 // ---------------------------------------------------------------------------
 
+function buildAgentsResponse(runtime: PluginRuntime): { agents: Record<string, { name: string; description: string }> } {
+  const cfg = runtime.config.loadConfig();
+  const agentList =
+    (cfg as Record<string, unknown> & { agents?: { list?: { id: string; name?: string }[] } })
+      .agents?.list ?? [];
+
+  const agents: Record<string, { name: string; description: string }> = {};
+  for (const agent of agentList) {
+    const name = agent.name ?? agent.id;
+    agents[agent.id] = { name, description: name };
+  }
+
+  // If no agents configured, expose a default "main" agent
+  if (Object.keys(agents).length === 0) {
+    agents["main"] = { name: "main", description: "Default agent" };
+  }
+
+  return { agents };
+}
+
 export function createAguiInfoHandler(api: OpenClawPluginApi) {
   const runtime: PluginRuntime = api.runtime;
 
@@ -650,22 +680,6 @@ export function createAguiInfoHandler(api: OpenClawPluginApi) {
       return;
     }
 
-    const cfg = runtime.config.loadConfig();
-    const agentList =
-      (cfg as Record<string, unknown> & { agents?: { list?: { id: string; name?: string }[] } })
-        .agents?.list ?? [];
-
-    const agents: Record<string, { name: string; description: string }> = {};
-    for (const agent of agentList) {
-      const name = agent.name ?? agent.id;
-      agents[agent.id] = { name, description: name };
-    }
-
-    // If no agents configured, expose a default "main" agent
-    if (Object.keys(agents).length === 0) {
-      agents["main"] = { name: "main", description: "Default agent" };
-    }
-
-    sendJson(res, 200, { agents });
+    sendJson(res, 200, buildAgentsResponse(runtime));
   };
 }

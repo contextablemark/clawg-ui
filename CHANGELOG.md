@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1 (2026-03-13)
+
+### Fixed
+- Handle `{ method: "info" }` POST on the main `/v1/clawg-ui` endpoint for CopilotKit single-transport mode — previously fell through to the empty-messages SSE path, returning SSE instead of JSON
+
 ## 0.4.0 (2026-03-13)
 
 ### Added
