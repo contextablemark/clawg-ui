@@ -356,10 +356,15 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
 
     // Resolve agent route
     const cfg = runtime.config.loadConfig();
+    const agentIdHeader =
+      typeof req.headers["x-openclaw-agent-id"] === "string"
+        ? req.headers["x-openclaw-agent-id"]
+        : undefined;
     const route = runtime.channel.routing.resolveAgentRoute({
       cfg,
       channel: "clawg-ui",
       peer: { kind: "dm", id: `clawg-ui-${threadId}` },
+      accountId: agentIdHeader,
     });
 
     // Set up SSE via EventEncoder
