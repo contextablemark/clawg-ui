@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.4 (2026-03-15)
+
+### Added
+- Forward AG-UI `RunAgentInput.context` entries to the LLM prompt — each context entry (description + value) is formatted and appended to `BodyForAgent` so the agent sees UI-provided context (e.g. pending tool-call approvals, app state)
+
 ## 0.4.3 (2026-03-14)
 
 ### Added
