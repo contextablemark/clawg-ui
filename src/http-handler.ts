@@ -183,6 +183,19 @@ function buildBodyFromMessages(messages: Message[]): {
 }
 
 // ---------------------------------------------------------------------------
+// Format AG-UI context entries for the LLM prompt
+// ---------------------------------------------------------------------------
+
+function formatContextEntries(
+  context: Array<{ description: string; value: string }>,
+): string | undefined {
+  const entries = context.filter((c) => c.description || c.value);
+  if (entries.length === 0) return undefined;
+  const parts = entries.map((c) => `### ${c.description}\n${c.value}`);
+  return `\n\n## Context provided by the UI\n\n${parts.join("\n\n")}`;
+}
+
+// ---------------------------------------------------------------------------
 // HTTP handler factory
 // ---------------------------------------------------------------------------
 
@@ -341,6 +354,13 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
 
     // Build body from messages
     const { body: messageBody } = buildBodyFromMessages(messages);
+
+    // Format AG-UI context entries (if any) for injection into the agent prompt
+    const contextSuffix =
+      Array.isArray(input.context) && input.context.length > 0
+        ? formatContextEntries(input.context as Array<{ description: string; value: string }>)
+        : undefined;
+
     if (!messageBody.trim()) {
       console.log(
         `[clawg-ui] 400: empty extracted body, roles=[${messages.map((m) => m.role).join(",")}], contents=[${messages.map((m) => JSON.stringify(m.content)).join(",")}]`,
@@ -476,6 +496,7 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
 
     const ctxPayload = runtime.channel.reply.finalizeInboundContext({
       Body: envelopedBody,
+      BodyForAgent: contextSuffix ? envelopedBody + contextSuffix : undefined,
       RawBody: messageBody,
       CommandBody: messageBody,
       From: `clawg-ui:${deviceId}`,

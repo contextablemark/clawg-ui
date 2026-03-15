@@ -665,6 +665,137 @@ describe("AG-UI HTTP handler", () => {
 });
 
 // ---------------------------------------------------------------------------
+// AG-UI context forwarding
+// ---------------------------------------------------------------------------
+
+describe("AG-UI RunAgentInput.context forwarding", () => {
+  let fakeApi: ReturnType<typeof createFakeApi>;
+  let handler: (req: IncomingMessage, res: ServerResponse) => Promise<void>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.OPENCLAW_GATEWAY_TOKEN = GATEWAY_SECRET;
+    fakeApi = createFakeApi([APPROVED_DEVICE_ID]);
+    handler = createAguiHttpHandler(fakeApi as any);
+  });
+
+  it("includes context entries in BodyForAgent", async () => {
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
+    const req = createReq({
+      headers: { authorization: `Bearer ${token}` },
+      body: {
+        threadId: "t-ctx",
+        runId: "r-ctx",
+        messages: [{ role: "user", content: "Approve writes" }],
+        context: [
+          {
+            description: "Pending tool-call approvals",
+            value: '[{"callId":"write_123","toolName":"write"}]',
+          },
+        ],
+      },
+    });
+    const res = createRes();
+    await handler(req, res);
+
+    const rt = (fakeApi as any).runtime;
+    const call = rt.channel.reply.finalizeInboundContext.mock.calls[0]?.[0];
+    expect(call).toBeDefined();
+    expect(call.BodyForAgent).toContain("## Context provided by the UI");
+    expect(call.BodyForAgent).toContain("### Pending tool-call approvals");
+    expect(call.BodyForAgent).toContain("write_123");
+  });
+
+  it("does not set BodyForAgent when context is empty", async () => {
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
+    const req = createReq({
+      headers: { authorization: `Bearer ${token}` },
+      body: {
+        threadId: "t-ctx-empty",
+        runId: "r-ctx-empty",
+        messages: [{ role: "user", content: "Hello" }],
+        context: [],
+      },
+    });
+    const res = createRes();
+    await handler(req, res);
+
+    const rt = (fakeApi as any).runtime;
+    const call = rt.channel.reply.finalizeInboundContext.mock.calls[0]?.[0];
+    expect(call).toBeDefined();
+    expect(call.BodyForAgent).toBeUndefined();
+  });
+
+  it("filters out context entries with empty description and value", async () => {
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
+    const req = createReq({
+      headers: { authorization: `Bearer ${token}` },
+      body: {
+        threadId: "t-ctx-filter",
+        runId: "r-ctx-filter",
+        messages: [{ role: "user", content: "Hello" }],
+        context: [
+          { description: "", value: "" },
+          { description: "App state", value: "editing" },
+        ],
+      },
+    });
+    const res = createRes();
+    await handler(req, res);
+
+    const rt = (fakeApi as any).runtime;
+    const call = rt.channel.reply.finalizeInboundContext.mock.calls[0]?.[0];
+    expect(call).toBeDefined();
+    expect(call.BodyForAgent).toContain("### App state");
+    expect(call.BodyForAgent).toContain("editing");
+    // Should not have an empty heading
+    expect(call.BodyForAgent).not.toContain("### \n");
+  });
+
+  it("does not set BodyForAgent when all context entries are empty", async () => {
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
+    const req = createReq({
+      headers: { authorization: `Bearer ${token}` },
+      body: {
+        threadId: "t-ctx-all-empty",
+        runId: "r-ctx-all-empty",
+        messages: [{ role: "user", content: "Hello" }],
+        context: [
+          { description: "", value: "" },
+          { description: "", value: "" },
+        ],
+      },
+    });
+    const res = createRes();
+    await handler(req, res);
+
+    const rt = (fakeApi as any).runtime;
+    const call = rt.channel.reply.finalizeInboundContext.mock.calls[0]?.[0];
+    expect(call).toBeDefined();
+    expect(call.BodyForAgent).toBeUndefined();
+  });
+
+  it("does not set BodyForAgent when context is absent", async () => {
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
+    const req = createReq({
+      headers: { authorization: `Bearer ${token}` },
+      body: {
+        threadId: "t-ctx-none",
+        runId: "r-ctx-none",
+        messages: [{ role: "user", content: "Hello" }],
+      },
+    });
+    const res = createRes();
+    await handler(req, res);
+
+    const rt = (fakeApi as any).runtime;
+    const call = rt.channel.reply.finalizeInboundContext.mock.calls[0]?.[0];
+    expect(call).toBeDefined();
+    expect(call.BodyForAgent).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Device Pairing Tests
 // ---------------------------------------------------------------------------
 
