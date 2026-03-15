@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.3 (2026-03-14)
+
+### Added
+- Implement `X-OpenClaw-Agent-Id` header routing — pass the header value as `accountId` to `resolveAgentRoute`, enabling agent selection via bindings (e.g. `{ "agentId": "auditor", "match": { "channel": "clawg-ui", "accountId": "auditor" } }`)
+
 ## 0.4.2 (2026-03-13)
 
 ### Removed

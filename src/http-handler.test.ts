@@ -587,6 +587,53 @@ describe("AG-UI HTTP handler", () => {
     expect(types).toContain(EventType.RUN_FINISHED);
   });
 
+  it("passes X-OpenClaw-Agent-Id header as accountId to resolveAgentRoute", async () => {
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
+    const req = createReq({
+      headers: {
+        authorization: `Bearer ${token}`,
+        "x-openclaw-agent-id": "auditor",
+      },
+      body: {
+        threadId: "t-agent",
+        runId: "r-agent",
+        messages: [{ role: "user", content: "Hello auditor" }],
+      },
+    });
+    const res = createRes();
+    await handler(req, res);
+
+    const rt = (fakeApi as any).runtime;
+    expect(rt.channel.routing.resolveAgentRoute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: "clawg-ui",
+        accountId: "auditor",
+      }),
+    );
+  });
+
+  it("does not pass accountId when X-OpenClaw-Agent-Id header is absent", async () => {
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
+    const req = createReq({
+      headers: { authorization: `Bearer ${token}` },
+      body: {
+        threadId: "t-no-agent",
+        runId: "r-no-agent",
+        messages: [{ role: "user", content: "Hello" }],
+      },
+    });
+    const res = createRes();
+    await handler(req, res);
+
+    const rt = (fakeApi as any).runtime;
+    expect(rt.channel.routing.resolveAgentRoute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: "clawg-ui",
+        accountId: undefined,
+      }),
+    );
+  });
+
   it("handles client disconnect by aborting", async () => {
     const rt = (fakeApi as any).runtime;
     let capturedAbortSignal: AbortSignal | undefined;
