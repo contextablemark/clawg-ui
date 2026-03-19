@@ -70,6 +70,27 @@ function getBearerToken(req: IncomingMessage): string | undefined {
 }
 
 // ---------------------------------------------------------------------------
+// Session-key header validation
+// ---------------------------------------------------------------------------
+
+/**
+ * Validate an `X-OpenClaw-Session-Key` header value.
+ *
+ * Returns the trimmed value if valid, or `null` if it must be rejected.
+ * The header is intended to be set by a trusted reverse proxy that has
+ * already authenticated the user — we still validate defensively so a
+ * misconfigured proxy or a bypass cannot introduce path-traversal or
+ * oversized keys into the session store.
+ */
+function validateSessionKeyHeader(raw: string): string | null {
+  const v = raw.trim();
+  if (!v || v.length > 256) return null;
+  if (v.includes("..") || /[/\\\0]/.test(v)) return null;
+  if (!/^[A-Za-z0-9._@:-]+$/.test(v)) return null;
+  return v;
+}
+
+// ---------------------------------------------------------------------------
 // HMAC-signed device token utilities
 // ---------------------------------------------------------------------------
 
@@ -379,6 +400,29 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
       typeof req.headers["x-openclaw-agent-id"] === "string"
         ? req.headers["x-openclaw-agent-id"]
         : undefined;
+
+    // Support custom session key via header for per-user isolation.
+    // Treated as a trusted-proxy-only concern (see README "Session isolation"):
+    // the value only *scopes* route.sessionKey — it never replaces it.
+    const sessionKeyHeader =
+      typeof req.headers["x-openclaw-session-key"] === "string"
+        ? req.headers["x-openclaw-session-key"]
+        : undefined;
+    let userKey: string | undefined;
+    if (sessionKeyHeader !== undefined) {
+      const validated = validateSessionKeyHeader(sessionKeyHeader);
+      if (!validated) {
+        sendJson(res, 400, {
+          error: {
+            message: "Invalid X-OpenClaw-Session-Key header.",
+            type: "invalid_request_error",
+          },
+        });
+        return;
+      }
+      userKey = validated;
+    }
+
     const route = runtime.channel.routing.resolveAgentRoute({
       cfg,
       channel: "clawg-ui",
@@ -428,11 +472,13 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
       runId,
     });
 
-    // Build inbound context using the plugin runtime (same pattern as msteams)
-    // Append thread suffix so each thread gets its own session within the device
-    const sessionKey = threadId
-      ? `${route.sessionKey}:thread:${threadId.toLowerCase()}`
-      : route.sessionKey;
+    // Build inbound context using the plugin runtime (same pattern as msteams).
+    // Compose session scopes under route.sessionKey — the :user: suffix (from
+    // the validated header) and the :thread: suffix both subdivide the route
+    // scope and never replace it.
+    let sessionKey = route.sessionKey;
+    if (userKey) sessionKey += `:user:${userKey}`;
+    if (threadId) sessionKey += `:thread:${threadId.toLowerCase()}`;
 
     // Stash client-provided tools so the plugin tool factory can pick them up
     if (Array.isArray(input.tools) && input.tools.length > 0) {
