@@ -380,6 +380,13 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
       typeof req.headers["x-openclaw-agent-id"] === "string"
         ? req.headers["x-openclaw-agent-id"]
         : undefined;
+    
+    // Support custom session key via header (for per-user isolation)
+    const sessionKeyHeader =
+      typeof req.headers["x-openclaw-session-key"] === "string"
+        ? req.headers["x-openclaw-session-key"]
+        : undefined;
+    
     const route = runtime.channel.routing.resolveAgentRoute({
       cfg,
       channel: "clawg-ui",
@@ -464,7 +471,8 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
     });
 
     // Build inbound context using the plugin runtime (same pattern as msteams)
-    const sessionKey = route.sessionKey;
+    // Use custom session key from header if provided (enables per-user session isolation)
+    const sessionKey = sessionKeyHeader || route.sessionKey;
 
     // Stash client-provided tools so the plugin tool factory can pick them up
     if (Array.isArray(input.tools) && input.tools.length > 0) {

@@ -319,6 +319,22 @@ curl -N -X POST http://localhost:18789/v1/clawg-ui \
   -d '{"messages":[{"role":"user","content":"Hello"}]}'
 ```
 
+## Session isolation
+
+By default, sessions are keyed by `threadId`. For multi-user applications where each user needs isolated conversation history, you can override the session key with the `X-OpenClaw-Session-Key` header:
+
+```bash
+curl -N -X POST http://localhost:18789/v1/clawg-ui \
+  -H "Authorization: Bearer $CLAWG_UI_DEVICE_TOKEN" \
+  -H "X-OpenClaw-Session-Key: user@example.com" \
+  -d '{"messages":[{"role":"user","content":"Hello"}]}'
+```
+
+This is useful when:
+- Multiple users share the same AG-UI client (e.g., a web app with auth)
+- You want to key sessions by user identity rather than thread ID
+- CopilotKit or other AG-UI clients manage threadId internally
+
 ## Error responses
 
 Non-streaming errors return JSON:
