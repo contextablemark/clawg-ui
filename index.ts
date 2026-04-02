@@ -1,6 +1,6 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { Command } from "commander";
-import { emptyPluginConfigSchema } from "openclaw/plugin-sdk";
+import { emptyPluginConfigSchema, registerPluginHttpRoute } from "openclaw/plugin-sdk";
 import { randomUUID } from "node:crypto";
 import { EventType } from "@ag-ui/core";
 import { aguiChannelPlugin } from "./src/channel.js";
@@ -149,11 +149,12 @@ const plugin: {
   register(api: OpenClawPluginApi) {
     api.registerChannel({ plugin: aguiChannelPlugin });
     api.registerTool(clawgUiToolFactory);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- auth/match not yet in SDK typings but required at runtime
-    (api.registerHttpRoute as (params: any) => void)({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- auth/match added in newer SDK
+    (registerPluginHttpRoute as (params: any) => () => void)({
       path: "/v1/clawg-ui",
-      match: "exact",
       auth: "plugin",
+      match: "exact",
+      pluginId: "clawg-ui",
       handler: createAguiHttpHandler(api),
     });
 

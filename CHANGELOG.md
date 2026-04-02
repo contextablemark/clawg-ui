@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.2 (2026-04-02)
+
+### Fixed
+- Use `registerPluginHttpRoute()` from the plugin SDK instead of `api.registerHttpRoute()` to work around a known OpenClaw startup timing issue where plugin HTTP routes registered via `api.registerHttpRoute()` are not included in the pinned HTTP route registry. This affected OpenClaw 2026.3.23+ where the gateway pins the HTTP route registry before external plugin `register()` callbacks complete.
+
 ## 0.5.1 (2026-04-01)
 
 ### Fixed
