@@ -149,11 +149,18 @@ const plugin: {
   register(api: OpenClawPluginApi) {
     api.registerChannel({ plugin: aguiChannelPlugin });
     api.registerTool(clawgUiToolFactory);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- auth not yet in SDK typings but required at runtime
-    (api.registerHttpRoute as (params: any) => void)({
-      path: "/v1/clawg-ui",
-      auth: "plugin",
-      handler: createAguiHttpHandler(api),
+    // Use registerPluginHttpRoute from plugin-runtime which writes directly to
+    // the pinned HTTP route registry. api.registerHttpRoute writes to the
+    // loader's private registry which is not the one the HTTP handler reads.
+    // @ts-expect-error -- openclaw/plugin-sdk/plugin-runtime is not in local SDK typings but exists at runtime
+    import("openclaw/plugin-sdk/plugin-runtime").then((mod: any) => {
+      mod.registerPluginHttpRoute({
+        path: "/v1/clawg-ui",
+        auth: "plugin",
+        match: "exact",
+        pluginId: "clawg-ui",
+        handler: createAguiHttpHandler(api),
+      });
     });
 
     api.on("before_tool_call", handleBeforeToolCall);

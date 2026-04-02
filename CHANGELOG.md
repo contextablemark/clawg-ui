@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.5.4 (2026-04-02)
+
+### Fixed
+- Use `registerPluginHttpRoute()` from `openclaw/plugin-sdk/plugin-runtime` (dynamic import) to write directly to the pinned HTTP route registry. This is the correct fix for the startup timing issue — `api.registerHttpRoute()` writes to the loader's private registry which the HTTP handler never reads, regardless of when it's called.
+
+## 0.5.3 (2026-04-02) [yanked]
+
+### Fixed
+- Attempted `gateway_start` hook approach — `api.registerHttpRoute()` still writes to the wrong registry even when called post-startup. Use 0.5.4 instead.
+
+## 0.5.2 (2026-04-02) [yanked]
+
+### Fixed
+- Attempted to use `registerPluginHttpRoute()` from the plugin SDK — not exported in the public SDK. Use 0.5.3 instead.
+
+## 0.5.1 (2026-04-01)
+
+### Fixed
+- Add `match: "exact"` to `registerHttpRoute` call — required by OpenClaw 2026.3.23+ which changed the plugin HTTP route API to require an explicit match mode. Without it, the route registers silently but never matches incoming requests, resulting in a 404. Backwards compatible with older OpenClaw versions (unknown properties are ignored).
+
+## 0.5.0 (2026-04-01)
+
+### Changed
+- **Breaking:** Peer ID now uses the stable device UUID instead of the per-thread ID. This enables identity linking (`session.identityLinks`) so clawg-ui devices can be linked to users across channels, matching how Telegram and Slack connections work.
+- Session keys now include a `:thread:<threadId>` suffix for per-thread session separation (same pattern as Slack thread sessions).
+
+### Migration
+- **Identity linking:** You can now add clawg-ui device IDs to `session.identityLinks` in `openclaw.json`:
+  ```json
+  {
+    "session": {
+      "dmScope": "per-peer",
+      "identityLinks": {
+        "alice": ["clawg-ui:<deviceId>", "telegram:123456", "slack:U0123ABC"]
+      }
+    }
+  }
+  ```
+  The device UUID is shown during pairing approval (`openclaw pairing list clawg-ui`).
+- **Session history:** Existing session histories are keyed on the old format (`clawg-ui-<threadId>` peer). After upgrading, devices will start new sessions. No data is lost — old sessions remain in the store but won't be matched by the new key format.
+
 ## 0.4.5 (2026-03-15)
 
 ### Added

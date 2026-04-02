@@ -383,7 +383,7 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
     const route = runtime.channel.routing.resolveAgentRoute({
       cfg,
       channel: "clawg-ui",
-      peer: { kind: "dm", id: `clawg-ui-${threadId}` },
+      peer: { kind: "dm", id: deviceId },
       accountId: agentIdHeader,
     });
 
@@ -464,7 +464,10 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
     });
 
     // Build inbound context using the plugin runtime (same pattern as msteams)
-    const sessionKey = route.sessionKey;
+    // Append thread suffix so each thread gets its own session within the device
+    const sessionKey = threadId
+      ? `${route.sessionKey}:thread:${threadId.toLowerCase()}`
+      : route.sessionKey;
 
     // Stash client-provided tools so the plugin tool factory can pick them up
     if (Array.isArray(input.tools) && input.tools.length > 0) {

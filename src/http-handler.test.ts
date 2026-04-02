@@ -341,7 +341,7 @@ describe("AG-UI HTTP handler", () => {
     const rt = (fakeApi as any).runtime;
     expect(rt.channel.reply.dispatchReplyFromConfig).toHaveBeenCalledTimes(1);
     const call = rt.channel.reply.dispatchReplyFromConfig.mock.calls[0][0];
-    expect(call.ctx.SessionKey).toBe("agui:test-session");
+    expect(call.ctx.SessionKey).toBe("agui:test-session:thread:t1");
     expect(call.replyOptions.runId).toBe("r1");
   });
 
@@ -632,6 +632,64 @@ describe("AG-UI HTTP handler", () => {
         accountId: undefined,
       }),
     );
+  });
+
+  it("uses deviceId as peer ID for identity linking", async () => {
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
+    const req = createReq({
+      headers: { authorization: `Bearer ${token}` },
+      body: {
+        threadId: "t-peer",
+        runId: "r-peer",
+        messages: [{ role: "user", content: "Hello" }],
+      },
+    });
+    const res = createRes();
+    await handler(req, res);
+
+    const rt = (fakeApi as any).runtime;
+    expect(rt.channel.routing.resolveAgentRoute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: "clawg-ui",
+        peer: { kind: "dm", id: APPROVED_DEVICE_ID },
+      }),
+    );
+  });
+
+  it("appends thread suffix to session key for thread separation", async () => {
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
+    const req = createReq({
+      headers: { authorization: `Bearer ${token}` },
+      body: {
+        threadId: "My-Thread-42",
+        runId: "r-thread",
+        messages: [{ role: "user", content: "Hello" }],
+      },
+    });
+    const res = createRes();
+    await handler(req, res);
+
+    const rt = (fakeApi as any).runtime;
+    const call = rt.channel.reply.dispatchReplyFromConfig.mock.calls[0][0];
+    expect(call.ctx.SessionKey).toBe("agui:test-session:thread:my-thread-42");
+  });
+
+  it("uses base session key when threadId is absent", async () => {
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
+    const req = createReq({
+      headers: { authorization: `Bearer ${token}` },
+      body: {
+        runId: "r-no-thread",
+        messages: [{ role: "user", content: "Hello" }],
+      },
+    });
+    const res = createRes();
+    await handler(req, res);
+
+    const rt = (fakeApi as any).runtime;
+    const call = rt.channel.reply.dispatchReplyFromConfig.mock.calls[0][0];
+    // threadId defaults to "clawg-ui-<uuid>" so it will have a thread suffix
+    expect(call.ctx.SessionKey).toMatch(/^agui:test-session:thread:clawg-ui-/);
   });
 
   it("handles client disconnect by aborting", async () => {
