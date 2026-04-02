@@ -1,9 +1,14 @@
 # Changelog
 
-## 0.5.3 (2026-04-02)
+## 0.5.4 (2026-04-02)
 
 ### Fixed
-- Register HTTP route via `gateway_start` lifecycle hook instead of directly in `register()`. Works around a known OpenClaw startup timing issue (2026.3.23+) where the gateway pins the HTTP route registry before external plugin `register()` callbacks complete, causing routes registered via `api.registerHttpRoute()` to be silently lost.
+- Use `registerPluginHttpRoute()` from `openclaw/plugin-sdk/plugin-runtime` (dynamic import) to write directly to the pinned HTTP route registry. This is the correct fix for the startup timing issue — `api.registerHttpRoute()` writes to the loader's private registry which the HTTP handler never reads, regardless of when it's called.
+
+## 0.5.3 (2026-04-02) [yanked]
+
+### Fixed
+- Attempted `gateway_start` hook approach — `api.registerHttpRoute()` still writes to the wrong registry even when called post-startup. Use 0.5.4 instead.
 
 ## 0.5.2 (2026-04-02) [yanked]
 
