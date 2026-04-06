@@ -10,8 +10,6 @@ import {
   clearWriter,
   markClientToolNames,
   clearClientToolNames,
-  clearToolFiredInRun,
-  wasToolFiredInRun,
 } from "./tool-store.js";
 import {
   handleBeforeToolCall,
@@ -47,7 +45,6 @@ describe("Tool event hooks", () => {
   afterEach(() => {
     clearWriter(SESSION_KEY);
     clearClientToolNames(SESSION_KEY);
-    clearToolFiredInRun(SESSION_KEY);
   });
 
   // -------------------------------------------------------------------------
@@ -100,16 +97,6 @@ describe("Tool event hooks", () => {
       expect(mock.events[1].type).toBe(EventType.TOOL_CALL_END);
     });
 
-    it("sets toolFiredInRun flag", () => {
-      expect(wasToolFiredInRun(SESSION_KEY)).toBe(false);
-
-      handleBeforeToolCall(
-        { toolName: "get_weather", params: { city: "Tokyo" } },
-        { sessionKey: SESSION_KEY },
-      );
-
-      expect(wasToolFiredInRun(SESSION_KEY)).toBe(true);
-    });
   });
 
   // -------------------------------------------------------------------------

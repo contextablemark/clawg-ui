@@ -470,15 +470,11 @@ describe("AG-UI HTTP handler", () => {
     expect(types).toContain(EventType.RUN_FINISHED);
   });
 
-  it("splits into a new run when text follows a tool call", async () => {
-    const { setToolFiredInRun } = await import("./tool-store.js");
-
+  it("keeps tool calls and text in a single run (no run splitting)", async () => {
     const rt = (fakeApi as any).runtime;
     rt.channel.reply.dispatchReplyFromConfig.mockImplementation(
-      async ({ dispatcher, ctx }: { dispatcher: any; ctx: any }) => {
-        // Simulate a server tool call having fired (flag set by before_tool_call hook)
-        setToolFiredInRun(ctx.SessionKey);
-        // Agent now sends text — should trigger run split
+      async ({ dispatcher }: { dispatcher: any }) => {
+        // Tool call followed by text — should stay in the same run
         dispatcher.sendBlockReply({ text: "Here is the result" });
         dispatcher.sendFinalReply({ text: "" });
         return { queuedFinal: true, counts: { tool: 1, block: 1, final: 1 } };
@@ -489,64 +485,8 @@ describe("AG-UI HTTP handler", () => {
     const req = createReq({
       headers: { authorization: `Bearer ${token}` },
       body: {
-        threadId: "t-split",
-        runId: "r-split",
-        messages: [{ role: "user", content: "Hello" }],
-      },
-    });
-    const res = createRes();
-    await handler(req, res);
-
-    const events = parseEvents(res._chunks);
-    const types = events.map((e) => e.type);
-
-    // Should have two RUN_STARTED and two RUN_FINISHED events
-    const runStarted = events.filter((e) => e.type === EventType.RUN_STARTED);
-    const runFinished = events.filter((e) => e.type === EventType.RUN_FINISHED);
-    expect(runStarted.length).toBe(2);
-    expect(runFinished.length).toBe(2);
-
-    // First run uses the original runId
-    expect(runStarted[0]?.runId).toBe("r-split");
-    // Second run uses a new runId
-    expect(runStarted[1]?.runId).not.toBe("r-split");
-    expect(typeof runStarted[1]?.runId).toBe("string");
-
-    // The first RUN_FINISHED ends the tool run (original runId)
-    expect(runFinished[0]?.runId).toBe("r-split");
-    // The second RUN_FINISHED ends the text run (new runId)
-    expect(runFinished[1]?.runId).toBe(runStarted[1]?.runId);
-
-    // Sequence: RUN_STARTED(tool) → RUN_FINISHED(tool) → RUN_STARTED(text) → TEXT_MESSAGE_START → ... → RUN_FINISHED(text)
-    const firstFinishIdx = types.indexOf(EventType.RUN_FINISHED);
-    const secondStartIdx = types.indexOf(EventType.RUN_STARTED, 1);
-    const textStartIdx = types.indexOf(EventType.TEXT_MESSAGE_START);
-    expect(firstFinishIdx).toBeLessThan(secondStartIdx);
-    expect(secondStartIdx).toBeLessThan(textStartIdx);
-
-    // Text message events should reference the new run's messageId
-    expect(types).toContain(EventType.TEXT_MESSAGE_START);
-    expect(types).toContain(EventType.TEXT_MESSAGE_CONTENT);
-    expect(types).toContain(EventType.TEXT_MESSAGE_END);
-  });
-
-  it("does not split run when no tool was called before text", async () => {
-    const rt = (fakeApi as any).runtime;
-    rt.channel.reply.dispatchReplyFromConfig.mockImplementation(
-      async ({ dispatcher }: { dispatcher: any }) => {
-        // No tool call — just text
-        dispatcher.sendBlockReply({ text: "Hello from agent" });
-        dispatcher.sendFinalReply({ text: "" });
-        return { queuedFinal: true, counts: { tool: 0, block: 1, final: 1 } };
-      },
-    );
-
-    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
-    const req = createReq({
-      headers: { authorization: `Bearer ${token}` },
-      body: {
-        threadId: "t-nosplit",
-        runId: "r-nosplit",
+        threadId: "t-single",
+        runId: "r-single",
         messages: [{ role: "user", content: "Hello" }],
       },
     });
@@ -555,13 +495,18 @@ describe("AG-UI HTTP handler", () => {
 
     const events = parseEvents(res._chunks);
 
-    // Should have exactly one RUN_STARTED and one RUN_FINISHED
+    // Exactly one RUN_STARTED and one RUN_FINISHED — no splitting
     const runStarted = events.filter((e) => e.type === EventType.RUN_STARTED);
     const runFinished = events.filter((e) => e.type === EventType.RUN_FINISHED);
     expect(runStarted.length).toBe(1);
     expect(runFinished.length).toBe(1);
-    expect(runStarted[0]?.runId).toBe("r-nosplit");
-    expect(runFinished[0]?.runId).toBe("r-nosplit");
+    expect(runStarted[0]?.runId).toBe("r-single");
+    expect(runFinished[0]?.runId).toBe("r-single");
+
+    // Text events are present in the same run
+    expect(events.map((e) => e.type)).toContain(EventType.TEXT_MESSAGE_START);
+    expect(events.map((e) => e.type)).toContain(EventType.TEXT_MESSAGE_CONTENT);
+    expect(events.map((e) => e.type)).toContain(EventType.TEXT_MESSAGE_END);
   });
 
   it("includes tool messages in conversation context for new run", async () => {

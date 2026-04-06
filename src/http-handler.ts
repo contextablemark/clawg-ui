@@ -12,8 +12,6 @@ import {
   wasClientToolCalled,
   clearClientToolCalled,
   clearClientToolNames,
-  wasToolFiredInRun,
-  clearToolFiredInRun,
 } from "./tool-store.js";
 import { aguiChannelPlugin } from "./channel.js";
 import { resolveGatewaySecret } from "./gateway-secret.js";
@@ -417,40 +415,6 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
       }
     };
 
-    // If a tool call was emitted in the current run, finish that run and start
-    // a fresh one for text messages. This keeps tool events and text events in
-    // separate runs per the AG-UI protocol.
-    const splitRunIfToolFired = () => {
-      if (!wasToolFiredInRun(sessionKey)) {
-        return;
-      }
-      // Close any open text message before ending the run
-      if (messageStarted) {
-        writeEvent({
-          type: EventType.TEXT_MESSAGE_END,
-          messageId: currentMessageId,
-          runId: currentRunId,
-        });
-        messageStarted = false;
-      }
-      // End the tool run
-      writeEvent({
-        type: EventType.RUN_FINISHED,
-        threadId,
-        runId: currentRunId,
-      });
-      // Start a new run for text messages
-      currentRunId = `clawg-ui-run-${randomUUID()}`;
-      currentMessageId = `msg-${randomUUID()}`;
-      messageStarted = false;
-      clearToolFiredInRun(sessionKey);
-      writeEvent({
-        type: EventType.RUN_STARTED,
-        threadId,
-        runId: currentRunId,
-      });
-    };
-
     // Handle client disconnect
     req.on("close", () => {
       closed = true;
@@ -546,8 +510,6 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
           return false;
         }
 
-        splitRunIfToolFired();
-
         if (!messageStarted) {
           messageStarted = true;
           writeEvent({
@@ -574,8 +536,6 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
         const text = wasClientToolCalled(sessionKey) ? "" : payload.text?.trim();
 
         if (text) {
-          splitRunIfToolFired();
-
           if (!messageStarted) {
             messageStarted = true;
             writeEvent({
@@ -658,7 +618,6 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
       clearWriter(sessionKey);
       clearClientToolCalled(sessionKey);
       clearClientToolNames(sessionKey);
-      clearToolFiredInRun(sessionKey);
     }
   };
 }
