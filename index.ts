@@ -15,6 +15,12 @@ import {
   setClientToolCalled,
   setToolFiredInRun,
 } from "./src/tool-store.js";
+import {
+  extractToolResultText,
+  tryParseA2UIOperations,
+  groupBySurface,
+  A2UI_OPERATIONS_KEY,
+} from "./src/a2ui.js";
 
 // ---------------------------------------------------------------------------
 // Hook handlers — exported for testability
@@ -119,6 +125,14 @@ export function handleToolResultPersist(
     `[clawg-ui] tool_result_persist: writer=${writer ? "present" : "missing"}, toolCallId=${toolCallId ?? "none"}, messageId=${messageId ?? "none"}`,
   );
   if (writer && toolCallId && messageId) {
+    // Extract actual tool result text from event.message.content
+    const msg = (event as Record<string, unknown>).message as
+      | { content?: unknown }
+      | undefined;
+    const resultText = msg?.content
+      ? extractToolResultText(msg.content)
+      : "";
+
     console.log(
       `[clawg-ui] tool_result_persist: emitting TOOL_CALL_RESULT and TOOL_CALL_END`,
     );
@@ -126,8 +140,24 @@ export function handleToolResultPersist(
       type: EventType.TOOL_CALL_RESULT,
       toolCallId,
       messageId,
-      content: "",
+      content: resultText,
     });
+
+    // Detect A2UI and emit ACTIVITY_SNAPSHOT per surface
+    const a2uiOps = tryParseA2UIOperations(resultText);
+    if (a2uiOps) {
+      const groups = groupBySurface(a2uiOps);
+      for (const [surfaceId, ops] of groups) {
+        writer({
+          type: EventType.ACTIVITY_SNAPSHOT,
+          messageId: `a2ui-surface-${surfaceId}-${toolCallId}`,
+          activityType: "a2ui-surface",
+          content: { [A2UI_OPERATIONS_KEY]: ops },
+          replace: true,
+        });
+      }
+    }
+
     writer({
       type: EventType.TOOL_CALL_END,
       toolCallId,
@@ -149,6 +179,15 @@ const plugin: {
   register(api: OpenClawPluginApi) {
     api.registerChannel({ plugin: aguiChannelPlugin });
     api.registerTool(clawgUiToolFactory);
+    // Example tools (not published to npm — live in examples/)
+    import("./examples/cron-report-tool.js")
+      .then(({ cronReportToolFactory }) => {
+        api.registerTool(cronReportToolFactory, { name: "cron_report", optional: true });
+      })
+      .catch(() => {
+        // examples/ not available (npm install) — skip
+      });
+
     // Use registerPluginHttpRoute from plugin-sdk which writes directly to
     // the pinned HTTP route registry. api.registerHttpRoute writes to the
     // loader's private registry which is not the one the HTTP handler reads.

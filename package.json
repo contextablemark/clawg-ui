@@ -19,6 +19,7 @@
   "main": "./dist/index.js",
   "files": [
     "dist",
+    "!dist/examples",
     "openclaw.plugin.json"
   ],
   "scripts": {
