@@ -448,6 +448,37 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
     let messageStarted = false;
     let currentRunId = runId;
 
+    // Reasoning & step reporting config (default on, opt-out via channel defaults)
+    const channelDefaults = (cfg as Record<string, unknown>).channels as
+      | Record<string, { defaults?: Record<string, unknown> }>
+      | undefined;
+    const clawgDefaults = channelDefaults?.["clawg-ui"]?.defaults ?? {};
+    const surfaceReasoning = clawgDefaults.surfaceReasoning !== false;
+    const surfaceSteps = clawgDefaults.surfaceSteps !== false;
+
+    // Reasoning state
+    let reasoningMessageId: string | null = null;
+    let reasoningStarted = false;
+
+    // Step reporting state
+    const activeSteps = new Set<string>();
+
+    // Close any open reasoning block (called before RUN_FINISHED)
+    const closeReasoningIfOpen = () => {
+      if (reasoningStarted && reasoningMessageId) {
+        writeEvent({
+          type: EventType.REASONING_MESSAGE_END,
+          messageId: reasoningMessageId,
+        });
+        writeEvent({
+          type: EventType.REASONING_END,
+          messageId: reasoningMessageId,
+        });
+        reasoningStarted = false;
+        reasoningMessageId = null;
+      }
+    };
+
     const writeEvent = (event: { type: EventType } & Record<string, unknown>) => {
       if (closed) {
         return;
@@ -601,6 +632,7 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
           });
         }
         // End the message and run
+        closeReasoningIfOpen();
         if (messageStarted) {
           writeEvent({
             type: EventType.TEXT_MESSAGE_END,
@@ -633,12 +665,84 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
           runId,
           abortSignal: abortController.signal,
           disableBlockStreaming: false,
+          ...(surfaceReasoning ? { streamReasoning: true } : {}),
           onAgentRunStart: () => {},
+          ...(surfaceReasoning
+            ? {
+                onReasoningStream: (payload: { text?: string }) => {
+                  if (closed) return;
+                  const text = payload.text;
+                  if (!text) return;
+
+                  if (!reasoningStarted) {
+                    reasoningStarted = true;
+                    reasoningMessageId = `reason-${randomUUID()}`;
+                    writeEvent({
+                      type: EventType.REASONING_START,
+                      messageId: reasoningMessageId,
+                    });
+                    writeEvent({
+                      type: EventType.REASONING_MESSAGE_START,
+                      messageId: reasoningMessageId,
+                      role: "reasoning",
+                    });
+                  }
+                  writeEvent({
+                    type: EventType.REASONING_MESSAGE_CONTENT,
+                    messageId: reasoningMessageId,
+                    delta: text,
+                  });
+                },
+                onReasoningEnd: () => {
+                  if (closed || !reasoningStarted) return;
+                  writeEvent({
+                    type: EventType.REASONING_MESSAGE_END,
+                    messageId: reasoningMessageId,
+                  });
+                  writeEvent({
+                    type: EventType.REASONING_END,
+                    messageId: reasoningMessageId,
+                  });
+                  reasoningStarted = false;
+                  reasoningMessageId = null;
+                },
+              }
+            : {}),
+          ...(surfaceSteps
+            ? {
+                onItemEvent: (item: {
+                  itemId?: string;
+                  phase?: string;
+                  title?: string;
+                }) => {
+                  if (closed) return;
+                  const itemId = item.itemId;
+                  if (!itemId) return;
+                  if (item.phase === "started" && !activeSteps.has(itemId)) {
+                    activeSteps.add(itemId);
+                    writeEvent({
+                      type: EventType.STEP_STARTED,
+                      stepName: item.title ?? itemId,
+                    });
+                  } else if (
+                    (item.phase === "completed" || item.phase === "failed") &&
+                    activeSteps.has(itemId)
+                  ) {
+                    activeSteps.delete(itemId);
+                    writeEvent({
+                      type: EventType.STEP_FINISHED,
+                      stepName: item.title ?? itemId,
+                    });
+                  }
+                },
+              }
+            : {}),
         },
       });
 
       // If the dispatcher's final reply didn't close the stream, close it now
       if (!closed) {
+        closeReasoningIfOpen();
         if (messageStarted) {
           writeEvent({
             type: EventType.TEXT_MESSAGE_END,

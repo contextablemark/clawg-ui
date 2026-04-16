@@ -28,8 +28,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@ag-ui/core": "^0.0.43",
-    "@ag-ui/encoder": "^0.0.43"
+    "@ag-ui/core": "^0.0.52",
+    "@ag-ui/encoder": "^0.0.52"
   },
   "peerDependencies": {
     "openclaw": "*"
@@ -54,7 +54,9 @@
       "order": 90,
       "defaults": {
         "blockStreaming": true,
-        "chunkMode": "newline"
+        "chunkMode": "newline",
+        "surfaceReasoning": true,
+        "surfaceSteps": true
       }
     },
     "install": {
