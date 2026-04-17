@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.4 (2026-04-17)
+
+### Changed
+- **Compat with OpenClaw 2026.4.16 plugin-sdk API:**
+  - `upsertPairingRequest` now requires `accountId` — pass `"default"` to match `src/channel.ts`.
+  - `ChatType` literal `"dm"` renamed to `"direct"` for `resolveAgentRoute` peer kinds.
+  - `ReplyDispatcher` gained required `getFailedCounts` and `markComplete` members (no-op stubs — clawg-ui doesn't track retries or typing indicators).
+  - `openclaw/plugin-sdk/plugin-runtime` is now a typed public subpath; removed the `@ts-expect-error` suppression in `index.ts`.
+
+### Fixed
+- Two `src/integration.test.ts` cases (`rejects missing user message with 400`, `rejects empty messages array with 400`) expected HTTP 400 but the handler has returned `200` with an empty SSE run since commit `e3a88c8` (AG-UI protocol compliance for init/sync). Tests now match the current protocol-compliant behavior.
+
 ## 0.6.3 (2026-04-07)
 
 ### Added
