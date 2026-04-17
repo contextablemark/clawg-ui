@@ -131,24 +131,30 @@ describeIntegration("clawg-ui integration", () => {
 
   // -- Validation --------------------------------------------------------
 
-  it("rejects missing user message with 400", async () => {
+  it("returns empty SSE run when no user/tool messages (AG-UI init/sync)", async () => {
     const res = await postRun({
       threadId: "int-test",
       runId: "run-1",
       messages: [{ role: "system", content: "sys" }],
     });
-    expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body.error.type).toBe("invalid_request_error");
+    expect(res.status).toBe(200);
+    const events = await collectEvents(res);
+    const types = events.map((e) => e.type);
+    expect(types).toContain(EventType.RUN_STARTED);
+    expect(types).toContain(EventType.RUN_FINISHED);
   });
 
-  it("rejects empty messages array with 400", async () => {
+  it("returns empty SSE run when messages array is empty (AG-UI init/sync)", async () => {
     const res = await postRun({
       threadId: "int-test",
       runId: "run-1",
       messages: [],
     });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
+    const events = await collectEvents(res);
+    const types = events.map((e) => e.type);
+    expect(types).toContain(EventType.RUN_STARTED);
+    expect(types).toContain(EventType.RUN_FINISHED);
   });
 
   // -- SSE stream --------------------------------------------------------
