@@ -1,5 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { randomUUID, createHmac, timingSafeEqual } from "node:crypto";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { EventType } from "@ag-ui/core";
 import type { RunAgentInput, Message } from "@ag-ui/core";
 import { EventEncoder } from "@ag-ui/encoder";
@@ -115,14 +118,228 @@ function verifyDeviceToken(token: string, secret: string): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// Extract text from AG-UI messages
+// Multimodal content-part support
+//
+// Canonical AG-UI content-part schemas (@ag-ui/core):
+//   - ImageInputContentSchema     (0.0.52) — { type: "image",    source, metadata? }
+//   - AudioInputContentSchema     (0.0.52) — { type: "audio",    source, metadata? }
+//   - VideoInputContentSchema     (0.0.52) — { type: "video",    source, metadata? }
+//   - DocumentInputContentSchema  (0.0.52) — { type: "document", source, metadata? }
+//   - BinaryInputContentSchema    (0.0.43) — { type: "binary",   mimeType, data?, url?, filename?, id? }
+// where `source` is `{ type: "data"|"url", value, mimeType? }`.
+//
+// clawg-ui extracts inline-base64 attachments to temp files, injects MediaPath*
+// into the ctxPayload (same contract as the msteams channel), and cleans up in
+// a finally block. Remote http(s) URLs are rejected with 400 in this channel;
+// URL fetching is deferred pending a separate SSRF/size-enforcement design.
 // ---------------------------------------------------------------------------
+
+interface ExtractedAttachment {
+  path: string;
+  mimeType: string;
+  filename?: string;
+}
+
+const SOURCE_PART_TYPES = new Set(["image", "audio", "video", "document"]);
+
+type SourcePart = {
+  type: string;
+  source: { type: "data" | "url"; value: string; mimeType?: string };
+};
+
+type BinaryPart = {
+  type: "binary";
+  mimeType: string;
+  data?: string;
+  url?: string;
+  filename?: string;
+};
+
+function isSourcePart(part: unknown): part is SourcePart {
+  if (!part || typeof part !== "object") return false;
+  const p = part as Record<string, unknown>;
+  if (typeof p.type !== "string" || !SOURCE_PART_TYPES.has(p.type)) return false;
+  const src = p.source;
+  if (!src || typeof src !== "object") return false;
+  const s = src as Record<string, unknown>;
+  return (s.type === "data" || s.type === "url") && typeof s.value === "string";
+}
+
+function isBinaryPart(part: unknown): part is BinaryPart {
+  if (!part || typeof part !== "object") return false;
+  const p = part as Record<string, unknown>;
+  return p.type === "binary" && typeof p.mimeType === "string";
+}
+
+const MIME_EXTENSION_MAP: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "image/svg+xml": "svg",
+  "audio/mpeg": "mp3",
+  "audio/mp3": "mp3",
+  "audio/wav": "wav",
+  "audio/x-wav": "wav",
+  "audio/webm": "weba",
+  "audio/ogg": "ogg",
+  "video/mp4": "mp4",
+  "video/webm": "webm",
+  "video/quicktime": "mov",
+  "application/pdf": "pdf",
+  "text/plain": "txt",
+  "text/markdown": "md",
+  "text/csv": "csv",
+};
+
+function mimeToExtension(mimeType: string): string {
+  const mapped = MIME_EXTENSION_MAP[mimeType.toLowerCase()];
+  if (mapped) return mapped;
+  const subtype = mimeType.split("/")[1];
+  if (!subtype) return "bin";
+  const sanitized = subtype.replace(/[^a-z0-9]+/gi, "");
+  return sanitized || "bin";
+}
+
+function parseBase64DataUri(uri: string): { mimeType: string; data: string } | null {
+  // data:<mediatype>[;charset=...];base64,<base64data>
+  const match = uri.match(/^data:([^;,]+)(?:;[^,]*?)*;base64,(.+)$/);
+  if (!match) return null;
+  return { mimeType: match[1], data: match[2] };
+}
+
+async function writeAttachmentFile(
+  base64: string,
+  mimeType: string,
+): Promise<string | null> {
+  try {
+    const ext = mimeToExtension(mimeType);
+    const filePath = path.join(os.tmpdir(), `clawg-ui-${randomUUID()}.${ext}`);
+    await fs.writeFile(filePath, Buffer.from(base64, "base64"));
+    return filePath;
+  } catch (err) {
+    console.error(`[clawg-ui] Failed to save attachment:`, err);
+    return null;
+  }
+}
+
+interface AttachmentExtractionResult {
+  attachments: ExtractedAttachment[];
+  error?: string;
+}
+
+/**
+ * Extract every supported attachment content part from `user` messages,
+ * writing each inline-base64 payload to a temp file. Returns the list of
+ * extracted attachments plus an optional error string. If `error` is set,
+ * the caller must reject the request with 400 AND delete the already-
+ * extracted files — they are not in the ctxPayload yet.
+ */
+async function extractAndSaveAttachments(
+  messages: Message[],
+): Promise<AttachmentExtractionResult> {
+  const attachments: ExtractedAttachment[] = [];
+  const urlNotSupported =
+    "Remote attachment URLs are not yet supported; inline base64 is required.";
+
+  for (const msg of messages) {
+    if (msg.role !== "user" || !Array.isArray(msg.content)) continue;
+
+    for (const part of msg.content) {
+      if (isSourcePart(part)) {
+        const src = part.source;
+        if (src.type === "url") {
+          if (!src.value.startsWith("data:")) {
+            return { attachments, error: urlNotSupported };
+          }
+          const parsed = parseBase64DataUri(src.value);
+          if (!parsed) continue;
+          const mimeType = src.mimeType ?? parsed.mimeType;
+          const filePath = await writeAttachmentFile(parsed.data, mimeType);
+          if (filePath) attachments.push({ path: filePath, mimeType });
+        } else {
+          // source.type === "data"
+          const mimeType = src.mimeType ?? "application/octet-stream";
+          const filePath = await writeAttachmentFile(src.value, mimeType);
+          if (filePath) attachments.push({ path: filePath, mimeType });
+        }
+      } else if (isBinaryPart(part)) {
+        const { mimeType, data, url, filename } = part;
+        if (typeof data === "string" && data) {
+          const filePath = await writeAttachmentFile(data, mimeType);
+          if (filePath) attachments.push({ path: filePath, mimeType, filename });
+        } else if (typeof url === "string" && url) {
+          if (!url.startsWith("data:")) {
+            return { attachments, error: urlNotSupported };
+          }
+          const parsed = parseBase64DataUri(url);
+          if (!parsed) continue;
+          const filePath = await writeAttachmentFile(parsed.data, mimeType);
+          if (filePath) attachments.push({ path: filePath, mimeType, filename });
+        }
+      }
+    }
+  }
+
+  return { attachments };
+}
+
+async function cleanupAttachments(attachments: ExtractedAttachment[]): Promise<void> {
+  for (const a of attachments) {
+    await fs.unlink(a.path).catch(() => {});
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Extract text from AG-UI messages
+//
+// String content is returned as-is. Array content (multimodal) concatenates
+// every `text` part and appends a terse categorized marker when non-text
+// attachment parts are present (e.g. `[user attached: 2 images, 1 document]`),
+// so the downstream prompt has non-empty content and the LLM has a signal
+// about what's attached even if the agent runner can't forward the raw bytes.
+// ---------------------------------------------------------------------------
+
+function formatAttachmentMarker(counts: Record<string, number>): string | null {
+  const parts: string[] = [];
+  const plural = (n: number, singular: string, plural: string) =>
+    n === 1 ? `1 ${singular}` : `${n} ${plural}`;
+  if (counts.image) parts.push(plural(counts.image, "image", "images"));
+  if (counts.audio) parts.push(plural(counts.audio, "audio", "audio"));
+  if (counts.video) parts.push(plural(counts.video, "video", "videos"));
+  if (counts.document) parts.push(plural(counts.document, "document", "documents"));
+  if (counts.binary) parts.push(plural(counts.binary, "file", "files"));
+  return parts.length > 0 ? `[user attached: ${parts.join(", ")}]` : null;
+}
 
 function extractTextContent(msg: Message): string {
   if (typeof msg.content === "string") {
     return msg.content;
   }
-  return "";
+  if (!Array.isArray(msg.content)) {
+    return "";
+  }
+  const texts: string[] = [];
+  const counts: Record<string, number> = {};
+  for (const part of msg.content) {
+    if (!part || typeof part !== "object" || !("type" in part)) continue;
+    const p = part as { type: string; text?: string };
+    if (p.type === "text" && typeof p.text === "string") {
+      texts.push(p.text);
+    } else if (
+      p.type === "image" ||
+      p.type === "audio" ||
+      p.type === "video" ||
+      p.type === "document" ||
+      p.type === "binary"
+    ) {
+      counts[p.type] = (counts[p.type] ?? 0) + 1;
+    }
+  }
+  const marker = formatAttachmentMarker(counts);
+  if (marker) texts.push(marker);
+  return texts.join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -305,10 +522,12 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
     // Device approved - proceed with request
     // ---------------------------------------------------------------------------
 
-    // Parse body
+    // Parse body. Cap at 25 MB to accommodate multi-part inline-base64
+    // attachments (image/audio/video/document/binary). Larger media should be
+    // carried via a remote URL once URL fetching lands (see README "Attachments").
     let body: unknown;
     try {
-      body = await readJsonBody(req, 1024 * 1024);
+      body = await readJsonBody(req, 25 * 1024 * 1024);
     } catch (err) {
       sendJson(res, 400, {
         error: { message: String(err), type: "invalid_request_error" },
@@ -351,6 +570,22 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
       return;
     }
 
+    // Extract multimodal attachments (image/audio/video/document/binary) and
+    // write inline-base64 payloads to os.tmpdir(). Declared here so the
+    // finally block at the bottom of the handler can unlink every file.
+    const extractionResult = await extractAndSaveAttachments(messages);
+    if (extractionResult.error) {
+      await cleanupAttachments(extractionResult.attachments);
+      sendJson(res, 400, {
+        error: {
+          message: extractionResult.error,
+          type: "invalid_request_error",
+        },
+      });
+      return;
+    }
+    const extractedAttachments = extractionResult.attachments;
+
     // Build body from messages
     const { body: messageBody } = buildBodyFromMessages(messages);
 
@@ -364,6 +599,7 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
       console.log(
         `[clawg-ui] 400: empty extracted body, roles=[${messages.map((m) => m.role).join(",")}], contents=[${messages.map((m) => JSON.stringify(m.content)).join(",")}]`,
       );
+      await cleanupAttachments(extractedAttachments);
       sendJson(res, 400, {
         error: {
           message: "Could not extract a prompt from `messages`.",
@@ -462,6 +698,29 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
       body: messageBody,
     });
 
+    // Build MediaPath* payload for the OpenClaw agent runner (same shape the
+    // msteams channel uses). Single attachment sets the scalar fields; two or
+    // more also set the *s arrays. The runner is expected to forward media to
+    // the LLM for models that support the given mimeType.
+    const mediaPayload: Record<string, unknown> = {};
+    if (extractedAttachments.length > 0) {
+      const first = extractedAttachments[0];
+      mediaPayload.MediaPath = first.path;
+      mediaPayload.MediaUrl = first.path;
+      mediaPayload.MediaType = first.mimeType;
+      if (first.filename) mediaPayload.MediaFilename = first.filename;
+      if (extractedAttachments.length > 1) {
+        mediaPayload.MediaPaths = extractedAttachments.map((a) => a.path);
+        mediaPayload.MediaUrls = extractedAttachments.map((a) => a.path);
+        mediaPayload.MediaTypes = extractedAttachments.map((a) => a.mimeType);
+        if (extractedAttachments.some((a) => a.filename)) {
+          mediaPayload.MediaFilenames = extractedAttachments.map(
+            (a) => a.filename ?? "",
+          );
+        }
+      }
+    }
+
     const ctxPayload = runtime.channel.reply.finalizeInboundContext({
       Body: envelopedBody,
       BodyForAgent: contextSuffix ? envelopedBody + contextSuffix : undefined,
@@ -481,6 +740,7 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
       WasMentioned: true,
       CommandAuthorized: true,
       OriginatingChannel: "clawg-ui" as const,
+      ...mediaPayload,
     });
 
     // Record inbound session
@@ -621,6 +881,7 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
       clearWriter(sessionKey);
       clearClientToolCalled(sessionKey);
       clearClientToolNames(sessionKey);
+      await cleanupAttachments(extractedAttachments);
     }
   };
 }

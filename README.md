@@ -156,6 +156,43 @@ The endpoint accepts a POST with a JSON body matching the AG-UI `RunAgentInput` 
 
 Supported roles: `user`, `assistant`, `system`, `tool`.
 
+### Attachments (multimodal content parts)
+
+`user` messages may carry an array of content parts in place of a plain string. clawg-ui extracts inline-base64 attachments to temp files and passes them to the OpenClaw agent runner via `MediaPath` / `MediaUrl` / `MediaType` (and `MediaPaths` / `MediaUrls` / `MediaTypes` arrays for multiple attachments) on the inbound context — the same contract used by the msteams channel. Temp files are unlinked after the agent run completes.
+
+**Supported content-part shapes** (from `@ag-ui/core`):
+
+- `text` — `{ "type": "text", "text": "…" }`
+- `image` / `audio` / `video` / `document` — `{ "type": <type>, "source": { "type": "data", "value": "<base64>", "mimeType": "…" } }`
+- `binary` (legacy 0.0.43 shape) — `{ "type": "binary", "mimeType": "…", "data": "<base64>" }` or `{ "type": "binary", "mimeType": "…", "url": "data:<mime>;base64,<base64>" }`
+
+Example request with a text prompt plus an inline image:
+
+```json
+{
+  "threadId": "thread-1",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        { "type": "text", "text": "What is in this picture?" },
+        {
+          "type": "image",
+          "source": { "type": "data", "value": "iVBORw0KGgo…", "mimeType": "image/png" }
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Limits and caveats:**
+
+- Inline base64 only. **Remote `http(s)` URLs are not yet supported** and are rejected with `400 invalid_request_error`. URL fetching is deferred pending SSRF / size-enforcement work.
+- Request body is capped at **25 MB**. Multi-part image/audio/document payloads fit comfortably; larger media should wait for URL support.
+- When a `user` message contains only attachments (no `text` part), clawg-ui appends a terse marker like `[user attached: 2 images, 1 document]` to the prompt so the downstream agent receives non-empty content and has a signal about what is attached.
+- Whether the attached media is actually passed to the underlying LLM depends on the configured agent and model. This channel writes the files and populates `MediaPath*`; the OpenClaw agent runner (and the selected model's capabilities) determine what reaches the LLM. Image/vision support is verified end-to-end today; audio/video/document rely on the same injection and will reach models that support those modalities.
+
 ## Response format
 
 The response is an SSE stream. Each event is a `data:` line containing a JSON object with a `type` field from the AG-UI `EventType` enum:
