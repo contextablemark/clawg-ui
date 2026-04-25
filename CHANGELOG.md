@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **`X-OpenClaw-Session-Key` header for per-user session isolation** — when present, the validated header value is composed under the route-derived session key as `<route.sessionKey>[:user:<header>][:thread:<threadId>]`. The header subdivides the route scope and never replaces it, enabling multi-user web apps (e.g. CopilotKit deployments where one AG-UI client is shared across authenticated users) to keep per-user conversation history isolated. Treat as a trusted-proxy-only header (analogous to `X-Forwarded-For`) — see the new "Session isolation" section in the README. Values are validated for length (1–256), charset (`[A-Za-z0-9._@:-]`), and path-traversal sequences; invalid values return `400 invalid_request_error` before the agent is dispatched. Thanks to @mikehole for the contribution (#22).
+
 ## 0.6.4 (2026-04-17)
 
 ### Changed
