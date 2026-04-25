@@ -637,6 +637,224 @@ describe("AG-UI HTTP handler", () => {
     expect(call.ctx.SessionKey).toMatch(/^agui:test-session:thread:clawg-ui-/);
   });
 
+  // -------------------------------------------------------------------------
+  // X-OpenClaw-Session-Key — per-user session scoping
+  // -------------------------------------------------------------------------
+
+  it("appends user suffix to session key when X-OpenClaw-Session-Key is provided", async () => {
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
+    const req = createReq({
+      headers: {
+        authorization: `Bearer ${token}`,
+        "x-openclaw-session-key": "alice@example.com",
+      },
+      body: {
+        threadId: "t-user",
+        runId: "r-user",
+        messages: [{ role: "user", content: "Hello" }],
+      },
+    });
+    const res = createRes();
+    await handler(req, res);
+
+    const rt = (fakeApi as any).runtime;
+    const call = rt.channel.reply.dispatchReplyFromConfig.mock.calls[0][0];
+    expect(call.ctx.SessionKey).toBe(
+      "agui:test-session:user:alice@example.com:thread:t-user",
+    );
+  });
+
+  it("composes user and thread suffixes together in order", async () => {
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
+    const req = createReq({
+      headers: {
+        authorization: `Bearer ${token}`,
+        "x-openclaw-session-key": "alice",
+      },
+      body: {
+        threadId: "t-1",
+        runId: "r-1",
+        messages: [{ role: "user", content: "Hello" }],
+      },
+    });
+    const res = createRes();
+    await handler(req, res);
+
+    const rt = (fakeApi as any).runtime;
+    const call = rt.channel.reply.dispatchReplyFromConfig.mock.calls[0][0];
+    expect(call.ctx.SessionKey).toBe("agui:test-session:user:alice:thread:t-1");
+  });
+
+  it("namespaces header value under route.sessionKey and never replaces it", async () => {
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
+    const req = createReq({
+      headers: {
+        authorization: `Bearer ${token}`,
+        "x-openclaw-session-key": "totally-different",
+      },
+      body: {
+        threadId: "t-hostile",
+        runId: "r-hostile",
+        messages: [{ role: "user", content: "Hello" }],
+      },
+    });
+    const res = createRes();
+    await handler(req, res);
+
+    const rt = (fakeApi as any).runtime;
+    const call = rt.channel.reply.dispatchReplyFromConfig.mock.calls[0][0];
+    expect(call.ctx.SessionKey.startsWith("agui:test-session:")).toBe(true);
+    expect(call.ctx.SessionKey).toContain(":user:totally-different");
+  });
+
+  it("falls back to route.sessionKey scoping when X-OpenClaw-Session-Key is absent", async () => {
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
+    const req = createReq({
+      headers: { authorization: `Bearer ${token}` },
+      body: {
+        threadId: "t-nouser",
+        runId: "r-nouser",
+        messages: [{ role: "user", content: "Hello" }],
+      },
+    });
+    const res = createRes();
+    await handler(req, res);
+
+    const rt = (fakeApi as any).runtime;
+    const call = rt.channel.reply.dispatchReplyFromConfig.mock.calls[0][0];
+    expect(call.ctx.SessionKey).toBe("agui:test-session:thread:t-nouser");
+    expect(call.ctx.SessionKey).not.toContain(":user:");
+  });
+
+  it.each([
+    ["path traversal", "../evil"],
+    ["forward slash", "a/b"],
+    ["backslash", "a\\b"],
+    ["null byte", "a\0b"],
+  ])(
+    "rejects X-OpenClaw-Session-Key with %s (400 invalid_request_error)",
+    async (_label, value) => {
+      const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
+      const req = createReq({
+        headers: {
+          authorization: `Bearer ${token}`,
+          "x-openclaw-session-key": value,
+        },
+        body: {
+          threadId: "t",
+          runId: "r",
+          messages: [{ role: "user", content: "Hello" }],
+        },
+      });
+      const res = createRes();
+      await handler(req, res);
+
+      expect(res.statusCode).toBe(400);
+      const body = JSON.parse(res._chunks.join(""));
+      expect(body.error.type).toBe("invalid_request_error");
+    },
+  );
+
+  it("rejects X-OpenClaw-Session-Key exceeding 256 characters", async () => {
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
+    const req = createReq({
+      headers: {
+        authorization: `Bearer ${token}`,
+        "x-openclaw-session-key": "a".repeat(257),
+      },
+      body: {
+        threadId: "t",
+        runId: "r",
+        messages: [{ role: "user", content: "Hello" }],
+      },
+    });
+    const res = createRes();
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res._chunks.join(""));
+    expect(body.error.type).toBe("invalid_request_error");
+  });
+
+  it.each([
+    ["whitespace", "alice space"],
+    ["exclamation", "alice!"],
+    ["hash", "alice#b"],
+  ])(
+    "rejects X-OpenClaw-Session-Key with disallowed character (%s)",
+    async (_label, value) => {
+      const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
+      const req = createReq({
+        headers: {
+          authorization: `Bearer ${token}`,
+          "x-openclaw-session-key": value,
+        },
+        body: {
+          threadId: "t",
+          runId: "r",
+          messages: [{ role: "user", content: "Hello" }],
+        },
+      });
+      const res = createRes();
+      await handler(req, res);
+
+      expect(res.statusCode).toBe(400);
+    },
+  );
+
+  it.each([
+    ["email", "alice@example.com"],
+    ["uuid", "12345678-1234-1234-1234-123456789abc"],
+    ["colon-separated", "tenant-1:alice"],
+    ["dot-and-underscore", "user_1.alice"],
+  ])(
+    "accepts well-formed identifier (%s) and composes it under route.sessionKey",
+    async (_label, value) => {
+      const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
+      const req = createReq({
+        headers: {
+          authorization: `Bearer ${token}`,
+          "x-openclaw-session-key": value,
+        },
+        body: {
+          threadId: "t-ok",
+          runId: "r-ok",
+          messages: [{ role: "user", content: "Hello" }],
+        },
+      });
+      const res = createRes();
+      await handler(req, res);
+
+      expect(res.statusCode).toBe(200);
+      const rt = (fakeApi as any).runtime;
+      const call = rt.channel.reply.dispatchReplyFromConfig.mock.calls[0][0];
+      expect(call.ctx.SessionKey).toBe(
+        `agui:test-session:user:${value}:thread:t-ok`,
+      );
+    },
+  );
+
+  it("does not call resolveAgentRoute or dispatchReplyFromConfig when X-OpenClaw-Session-Key is invalid", async () => {
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
+    const req = createReq({
+      headers: {
+        authorization: `Bearer ${token}`,
+        "x-openclaw-session-key": "../escape",
+      },
+      body: {
+        threadId: "t",
+        runId: "r",
+        messages: [{ role: "user", content: "Hello" }],
+      },
+    });
+    const res = createRes();
+    await handler(req, res);
+
+    const rt = (fakeApi as any).runtime;
+    expect(rt.channel.routing.resolveAgentRoute).not.toHaveBeenCalled();
+    expect(rt.channel.reply.dispatchReplyFromConfig).not.toHaveBeenCalled();
+  });
+
   it("handles client disconnect by aborting", async () => {
     const rt = (fakeApi as any).runtime;
     let capturedAbortSignal: AbortSignal | undefined;
