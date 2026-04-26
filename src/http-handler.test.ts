@@ -509,6 +509,199 @@ describe("AG-UI HTTP handler", () => {
     expect(events.map((e) => e.type)).toContain(EventType.TEXT_MESSAGE_END);
   });
 
+  // -------------------------------------------------------------------------
+  // Reasoning events
+  // -------------------------------------------------------------------------
+
+  it("emits REASONING events when onReasoningStream/onReasoningEnd are invoked", async () => {
+    const rt = (fakeApi as any).runtime;
+    rt.channel.reply.dispatchReplyFromConfig.mockImplementation(
+      async ({ dispatcher, replyOptions }: { dispatcher: any; replyOptions: any }) => {
+        // Simulate reasoning stream
+        replyOptions.onReasoningStream({ text: "Let me think..." });
+        replyOptions.onReasoningStream({ text: "The answer is 42." });
+        replyOptions.onReasoningEnd();
+        // Then final text
+        dispatcher.sendFinalReply({ text: "The answer is 42." });
+        return { queuedFinal: true, counts: { tool: 0, block: 0, final: 1 } };
+      },
+    );
+
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
+    const req = createReq({
+      headers: { authorization: `Bearer ${token}` },
+      body: {
+        threadId: "t-reason",
+        runId: "r-reason",
+        messages: [{ role: "user", content: "Think carefully" }],
+      },
+    });
+    const res = createRes();
+    await handler(req, res);
+
+    const events = parseEvents(res._chunks);
+    const types = events.map((e) => e.type);
+
+    // Reasoning events should appear
+    expect(types).toContain(EventType.REASONING_START);
+    expect(types).toContain(EventType.REASONING_MESSAGE_START);
+    expect(types).toContain(EventType.REASONING_MESSAGE_CONTENT);
+    expect(types).toContain(EventType.REASONING_MESSAGE_END);
+    expect(types).toContain(EventType.REASONING_END);
+
+    // Reasoning message start should have role: "reasoning"
+    const reasonStart = events.find((e) => e.type === EventType.REASONING_MESSAGE_START);
+    expect(reasonStart?.role).toBe("reasoning");
+
+    // Two content deltas
+    const reasonContent = events.filter((e) => e.type === EventType.REASONING_MESSAGE_CONTENT);
+    expect(reasonContent).toHaveLength(2);
+    expect(reasonContent[0]?.delta).toBe("Let me think...");
+    expect(reasonContent[1]?.delta).toBe("The answer is 42.");
+
+    // All reasoning events share the same messageId
+    const reasoningEvents = events.filter(
+      (e) => typeof e.type === "string" && (e.type as string).startsWith("REASONING_"),
+    );
+    const messageIds = new Set(reasoningEvents.map((e) => e.messageId));
+    expect(messageIds.size).toBe(1);
+
+    // Reasoning messageId differs from text messageId
+    const textStart = events.find((e) => e.type === EventType.TEXT_MESSAGE_START);
+    expect(textStart?.messageId).not.toBe(reasoningEvents[0]?.messageId);
+
+    // Text message still present after reasoning
+    expect(types).toContain(EventType.TEXT_MESSAGE_START);
+    expect(types).toContain(EventType.RUN_FINISHED);
+  });
+
+  it("does not emit REASONING events when no reasoning stream fires", async () => {
+    const rt = (fakeApi as any).runtime;
+    rt.channel.reply.dispatchReplyFromConfig.mockImplementation(
+      async ({ dispatcher }: { dispatcher: any }) => {
+        dispatcher.sendFinalReply({ text: "Just text." });
+        return { queuedFinal: true, counts: { tool: 0, block: 0, final: 1 } };
+      },
+    );
+
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
+    const req = createReq({
+      headers: { authorization: `Bearer ${token}` },
+      body: {
+        threadId: "t-noreason",
+        runId: "r-noreason",
+        messages: [{ role: "user", content: "Hello" }],
+      },
+    });
+    const res = createRes();
+    await handler(req, res);
+
+    const events = parseEvents(res._chunks);
+    const types = events.map((e) => e.type);
+
+    expect(types).not.toContain(EventType.REASONING_START);
+    expect(types).not.toContain(EventType.REASONING_MESSAGE_START);
+  });
+
+  it("auto-closes reasoning if sendFinalReply fires before onReasoningEnd", async () => {
+    const rt = (fakeApi as any).runtime;
+    rt.channel.reply.dispatchReplyFromConfig.mockImplementation(
+      async ({ dispatcher, replyOptions }: { dispatcher: any; replyOptions: any }) => {
+        replyOptions.onReasoningStream({ text: "Thinking..." });
+        // No onReasoningEnd call — sendFinalReply should close it
+        dispatcher.sendFinalReply({ text: "Done." });
+        return { queuedFinal: true, counts: { tool: 0, block: 0, final: 1 } };
+      },
+    );
+
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
+    const req = createReq({
+      headers: { authorization: `Bearer ${token}` },
+      body: {
+        threadId: "t-autoclose",
+        runId: "r-autoclose",
+        messages: [{ role: "user", content: "Think" }],
+      },
+    });
+    const res = createRes();
+    await handler(req, res);
+
+    const events = parseEvents(res._chunks);
+    const types = events.map((e) => e.type);
+
+    // Reasoning should be properly closed even without explicit onReasoningEnd
+    expect(types).toContain(EventType.REASONING_START);
+    expect(types).toContain(EventType.REASONING_MESSAGE_END);
+    expect(types).toContain(EventType.REASONING_END);
+    expect(types).toContain(EventType.RUN_FINISHED);
+  });
+
+  // -------------------------------------------------------------------------
+  // Step events
+  // -------------------------------------------------------------------------
+
+  it("emits STEP_STARTED and STEP_FINISHED from onItemEvent", async () => {
+    const rt = (fakeApi as any).runtime;
+    rt.channel.reply.dispatchReplyFromConfig.mockImplementation(
+      async ({ dispatcher, replyOptions }: { dispatcher: any; replyOptions: any }) => {
+        replyOptions.onItemEvent({ itemId: "step-1", phase: "started", title: "Searching" });
+        replyOptions.onItemEvent({ itemId: "step-1", phase: "completed", title: "Searching" });
+        dispatcher.sendFinalReply({ text: "Found it." });
+        return { queuedFinal: true, counts: { tool: 0, block: 0, final: 1 } };
+      },
+    );
+
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
+    const req = createReq({
+      headers: { authorization: `Bearer ${token}` },
+      body: {
+        threadId: "t-step",
+        runId: "r-step",
+        messages: [{ role: "user", content: "Search" }],
+      },
+    });
+    const res = createRes();
+    await handler(req, res);
+
+    const events = parseEvents(res._chunks);
+    const types = events.map((e) => e.type);
+
+    expect(types).toContain(EventType.STEP_STARTED);
+    expect(types).toContain(EventType.STEP_FINISHED);
+
+    const stepStart = events.find((e) => e.type === EventType.STEP_STARTED);
+    expect(stepStart?.stepName).toBe("Searching");
+  });
+
+  it("deduplicates STEP_STARTED for the same itemId", async () => {
+    const rt = (fakeApi as any).runtime;
+    rt.channel.reply.dispatchReplyFromConfig.mockImplementation(
+      async ({ dispatcher, replyOptions }: { dispatcher: any; replyOptions: any }) => {
+        replyOptions.onItemEvent({ itemId: "s1", phase: "started", title: "Step A" });
+        replyOptions.onItemEvent({ itemId: "s1", phase: "started", title: "Step A" }); // duplicate
+        replyOptions.onItemEvent({ itemId: "s1", phase: "completed", title: "Step A" });
+        dispatcher.sendFinalReply({ text: "Done." });
+        return { queuedFinal: true, counts: { tool: 0, block: 0, final: 1 } };
+      },
+    );
+
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
+    const req = createReq({
+      headers: { authorization: `Bearer ${token}` },
+      body: {
+        threadId: "t-dedup",
+        runId: "r-dedup",
+        messages: [{ role: "user", content: "Go" }],
+      },
+    });
+    const res = createRes();
+    await handler(req, res);
+
+    const events = parseEvents(res._chunks);
+    const stepStarts = events.filter((e) => e.type === EventType.STEP_STARTED);
+    expect(stepStarts).toHaveLength(1);
+  });
+
   it("includes tool messages in conversation context for new run", async () => {
     const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
     const req = createReq({
