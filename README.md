@@ -4,6 +4,23 @@
 
 An [OpenClaw](https://github.com/openclaw/openclaw) channel plugin that exposes the gateway as an [AG-UI](https://docs.ag-ui.com) protocol-compatible HTTP endpoint. AG-UI clients such as [CopilotKit](https://www.copilotkit.ai) UIs and `@ag-ui/client` `HttpAgent` instances can connect to OpenClaw and receive streamed responses.
 
+## Companion: `@contextableai/clawpilotkit`
+
+If you want a ready-made chat UI that talks to this plugin, the
+companion package [`@contextableai/clawpilotkit`](./clawpilotkit/) ships
+the same prebuilt React + CopilotKit bundle in two modes:
+
+- **Embedded** in the OpenClaw operator console as a `chat.surface`
+  slot (renders inside the Chat tab in place of the built-in message
+  thread + input box, no pairing needed).
+- **Standalone** via `npx @contextableai/clawpilotkit` against any
+  clawg-ui ≥ 0.7.0 gateway (the launcher walks the user through device
+  pairing on first connect).
+
+See [`clawpilotkit/README.md`](./clawpilotkit/) for setup. The rest of
+this document covers the gateway-side plugin, which is what
+clawpilotkit (and any other AG-UI client) talks to.
+
 ## Installation
 
 ```bash

@@ -228,6 +228,21 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
     req: IncomingMessage,
     res: ServerResponse,
   ): Promise<void> {
+    // Cross-origin callers (for example a clawpilotkit standalone launcher
+    // running on a separate port) need CORS response headers — both on the
+    // OPTIONS preflight and on the eventual POST. Bearer auth + JSON body
+    // forces a preflight, so we have to answer 204 here. The route's
+    // gateway-side auth still requires a valid pairing token on the actual
+    // POST: CORS only governs which origins can read the response.
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Headers", "authorization, content-type");
+    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.setHeader("Access-Control-Max-Age", "86400");
+    if (req.method === "OPTIONS") {
+      res.statusCode = 204;
+      res.end();
+      return;
+    }
     // POST-only
     if (req.method !== "POST") {
       sendMethodNotAllowed(res);
@@ -325,7 +340,79 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
     // ---------------------------------------------------------------------------
     // Device approved - proceed with request
     // ---------------------------------------------------------------------------
+    await dispatchAuthenticatedAguiRequest(req, res, runtime, {
+      id: deviceId,
+      fromLabel: `clawg-ui:${deviceId}`,
+    });
+  };
+}
 
+/**
+ * Factory for the operator-auth AG-UI route.
+ *
+ * Mounted at a separate path (e.g. `/v1/clawg-ui/operator`) with
+ * `auth: "gateway"` — the OpenClaw gateway validates the caller's operator
+ * scopes before we see the request, so we skip the device-pairing dance. The
+ * AG-UI dispatch logic itself is identical to the device-token path.
+ *
+ * Intended for operator-UI-embedded consumers (plugin-contributed UI slots)
+ * that already hold an OpenClaw gateway token via `ExtensionTabContext` and
+ * should not need a second pairing flow.
+ */
+export function createOperatorAguiHttpHandler(api: OpenClawPluginApi) {
+  const runtime: PluginRuntime = api.runtime;
+
+  return async function handleOperatorAguiRequest(
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<void> {
+    // This route is reached from the OpenClaw operator console's
+    // `chat.surface` slot, which runs inside a sandboxed iframe without
+    // `allow-same-origin` — the iframe's document origin is opaque ("null").
+    // Any fetch from that context is treated by the browser as cross-origin
+    // and requires CORS response headers; an `Authorization` request header
+    // forces a preflight OPTIONS we also have to satisfy. `*` is safe here
+    // because the route still requires the gateway operator token, which the
+    // browser's SOP prevents a third-party origin from minting.
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Headers", "authorization, content-type");
+    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.setHeader("Access-Control-Max-Age", "86400");
+    if (req.method === "OPTIONS") {
+      res.statusCode = 204;
+      res.end();
+      return;
+    }
+    if (req.method !== "POST") {
+      sendMethodNotAllowed(res);
+      return;
+    }
+    await dispatchAuthenticatedAguiRequest(req, res, runtime, {
+      id: OPERATOR_CALLER_ID,
+      fromLabel: "clawg-ui:operator",
+    });
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Post-authentication AG-UI dispatch (shared by pairing + operator routes)
+// ---------------------------------------------------------------------------
+
+const OPERATOR_CALLER_ID = "openclaw-operator";
+
+interface AuthenticatedCaller {
+  /** Stable id used for peer routing, session keying, and audit attribution. */
+  id: string;
+  /** Envelope "From" label (typically `clawg-ui:<id>`). */
+  fromLabel: string;
+}
+
+async function dispatchAuthenticatedAguiRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  runtime: PluginRuntime,
+  caller: AuthenticatedCaller,
+): Promise<void> {
     // Parse body
     let body: unknown;
     try {
@@ -426,7 +513,7 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
     const route = runtime.channel.routing.resolveAgentRoute({
       cfg,
       channel: "clawg-ui",
-      peer: { kind: "direct", id: deviceId },
+      peer: { kind: "direct", id: caller.id },
       accountId: agentIdHeader,
     });
 
@@ -544,13 +631,13 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
       BodyForAgent: contextSuffix ? envelopedBody + contextSuffix : undefined,
       RawBody: messageBody,
       CommandBody: messageBody,
-      From: `clawg-ui:${deviceId}`,
+      From: caller.fromLabel,
       To: "clawg-ui",
       SessionKey: sessionKey,
       ChatType: "direct",
       ConversationLabel: "AG-UI",
       SenderName: "AG-UI Client",
-      SenderId: deviceId,
+      SenderId: caller.id,
       Provider: "clawg-ui" as const,
       Surface: "clawg-ui" as const,
       MessageSid: runId,
@@ -772,5 +859,4 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
       clearClientToolCalled(sessionKey);
       clearClientToolNames(sessionKey);
     }
-  };
 }

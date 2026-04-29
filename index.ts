@@ -4,7 +4,10 @@ import { emptyPluginConfigSchema } from "openclaw/plugin-sdk";
 import { randomUUID } from "node:crypto";
 import { EventType } from "@ag-ui/core";
 import { aguiChannelPlugin } from "./src/channel.js";
-import { createAguiHttpHandler } from "./src/http-handler.js";
+import {
+  createAguiHttpHandler,
+  createOperatorAguiHttpHandler,
+} from "./src/http-handler.js";
 import { clawgUiToolFactory } from "./src/client-tools.js";
 import {
   getWriter,
@@ -192,15 +195,30 @@ const plugin: {
     // Use registerPluginHttpRoute from plugin-runtime which writes directly to
     // the pinned HTTP route registry. api.registerHttpRoute writes to the
     // loader's private registry which is not the one the HTTP handler reads.
-    import("openclaw/plugin-sdk/plugin-runtime").then((mod: any) => {
-      mod.registerPluginHttpRoute({
-        path: "/v1/clawg-ui",
-        auth: "plugin",
-        match: "exact",
-        pluginId: "clawg-ui",
-        handler: createAguiHttpHandler(api),
+    import("openclaw/plugin-sdk/plugin-runtime")
+      .then((mod: any) => {
+        mod.registerPluginHttpRoute({
+          path: "/v1/clawg-ui",
+          auth: "plugin",
+          match: "exact",
+          pluginId: "clawg-ui",
+          handler: createAguiHttpHandler(api),
+        });
+        // Operator-auth AG-UI route — for OpenClaw operator-UI embedded
+        // consumers (plugin-contributed `chat.surface` slot, etc.) that
+        // already hold a gateway token and shouldn't need a second pairing
+        // dance. Gateway validates operator scope before our handler runs.
+        mod.registerPluginHttpRoute({
+          path: "/v1/clawg-ui/operator",
+          auth: "gateway",
+          match: "exact",
+          pluginId: "clawg-ui",
+          handler: createOperatorAguiHttpHandler(api),
+        });
+      })
+      .catch((err: unknown) => {
+        console.error("[clawg-ui] failed to register HTTP routes:", err);
       });
-    });
 
     api.on("before_tool_call", handleBeforeToolCall);
     api.on("tool_result_persist", handleToolResultPersist);
