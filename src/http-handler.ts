@@ -70,6 +70,27 @@ function getBearerToken(req: IncomingMessage): string | undefined {
 }
 
 // ---------------------------------------------------------------------------
+// Session-key header validation
+// ---------------------------------------------------------------------------
+
+/**
+ * Validate an `X-OpenClaw-Session-Key` header value.
+ *
+ * Returns the trimmed value if valid, or `null` if it must be rejected.
+ * The header is intended to be set by a trusted reverse proxy that has
+ * already authenticated the user — we still validate defensively so a
+ * misconfigured proxy or a bypass cannot introduce path-traversal or
+ * oversized keys into the session store.
+ */
+function validateSessionKeyHeader(raw: string): string | null {
+  const v = raw.trim();
+  if (!v || v.length > 256) return null;
+  if (v.includes("..") || /[/\\\0]/.test(v)) return null;
+  if (!/^[A-Za-z0-9._@:-]+$/.test(v)) return null;
+  return v;
+}
+
+// ---------------------------------------------------------------------------
 // HMAC-signed device token utilities
 // ---------------------------------------------------------------------------
 
@@ -466,6 +487,29 @@ async function dispatchAuthenticatedAguiRequest(
       typeof req.headers["x-openclaw-agent-id"] === "string"
         ? req.headers["x-openclaw-agent-id"]
         : undefined;
+
+    // Support custom session key via header for per-user isolation.
+    // Treated as a trusted-proxy-only concern (see README "Session isolation"):
+    // the value only *scopes* route.sessionKey — it never replaces it.
+    const sessionKeyHeader =
+      typeof req.headers["x-openclaw-session-key"] === "string"
+        ? req.headers["x-openclaw-session-key"]
+        : undefined;
+    let userKey: string | undefined;
+    if (sessionKeyHeader !== undefined) {
+      const validated = validateSessionKeyHeader(sessionKeyHeader);
+      if (!validated) {
+        sendJson(res, 400, {
+          error: {
+            message: "Invalid X-OpenClaw-Session-Key header.",
+            type: "invalid_request_error",
+          },
+        });
+        return;
+      }
+      userKey = validated;
+    }
+
     const route = runtime.channel.routing.resolveAgentRoute({
       cfg,
       channel: "clawg-ui",
@@ -491,6 +535,37 @@ async function dispatchAuthenticatedAguiRequest(
     let messageStarted = false;
     let currentRunId = runId;
 
+    // Reasoning & step reporting config (default on, opt-out via channel defaults)
+    const channelDefaults = (cfg as Record<string, unknown>).channels as
+      | Record<string, { defaults?: Record<string, unknown> }>
+      | undefined;
+    const clawgDefaults = channelDefaults?.["clawg-ui"]?.defaults ?? {};
+    const surfaceReasoning = clawgDefaults.surfaceReasoning !== false;
+    const surfaceSteps = clawgDefaults.surfaceSteps !== false;
+
+    // Reasoning state
+    let reasoningMessageId: string | null = null;
+    let reasoningStarted = false;
+
+    // Step reporting state
+    const activeSteps = new Set<string>();
+
+    // Close any open reasoning block (called before RUN_FINISHED)
+    const closeReasoningIfOpen = () => {
+      if (reasoningStarted && reasoningMessageId) {
+        writeEvent({
+          type: EventType.REASONING_MESSAGE_END,
+          messageId: reasoningMessageId,
+        });
+        writeEvent({
+          type: EventType.REASONING_END,
+          messageId: reasoningMessageId,
+        });
+        reasoningStarted = false;
+        reasoningMessageId = null;
+      }
+    };
+
     const writeEvent = (event: { type: EventType } & Record<string, unknown>) => {
       if (closed) {
         return;
@@ -515,11 +590,13 @@ async function dispatchAuthenticatedAguiRequest(
       runId,
     });
 
-    // Build inbound context using the plugin runtime (same pattern as msteams)
-    // Append thread suffix so each thread gets its own session within the device
-    const sessionKey = threadId
-      ? `${route.sessionKey}:thread:${threadId.toLowerCase()}`
-      : route.sessionKey;
+    // Build inbound context using the plugin runtime (same pattern as msteams).
+    // Compose session scopes under route.sessionKey — the :user: suffix (from
+    // the validated header) and the :thread: suffix both subdivide the route
+    // scope and never replace it.
+    let sessionKey = route.sessionKey;
+    if (userKey) sessionKey += `:user:${userKey}`;
+    if (threadId) sessionKey += `:thread:${threadId.toLowerCase()}`;
 
     // Stash client-provided tools so the plugin tool factory can pick them up
     if (Array.isArray(input.tools) && input.tools.length > 0) {
@@ -642,6 +719,7 @@ async function dispatchAuthenticatedAguiRequest(
           });
         }
         // End the message and run
+        closeReasoningIfOpen();
         if (messageStarted) {
           writeEvent({
             type: EventType.TEXT_MESSAGE_END,
@@ -674,12 +752,84 @@ async function dispatchAuthenticatedAguiRequest(
           runId,
           abortSignal: abortController.signal,
           disableBlockStreaming: false,
+          ...(surfaceReasoning ? { streamReasoning: true } : {}),
           onAgentRunStart: () => {},
+          ...(surfaceReasoning
+            ? {
+                onReasoningStream: (payload: { text?: string }) => {
+                  if (closed) return;
+                  const text = payload.text;
+                  if (!text) return;
+
+                  if (!reasoningStarted) {
+                    reasoningStarted = true;
+                    reasoningMessageId = `reason-${randomUUID()}`;
+                    writeEvent({
+                      type: EventType.REASONING_START,
+                      messageId: reasoningMessageId,
+                    });
+                    writeEvent({
+                      type: EventType.REASONING_MESSAGE_START,
+                      messageId: reasoningMessageId,
+                      role: "reasoning",
+                    });
+                  }
+                  writeEvent({
+                    type: EventType.REASONING_MESSAGE_CONTENT,
+                    messageId: reasoningMessageId,
+                    delta: text,
+                  });
+                },
+                onReasoningEnd: () => {
+                  if (closed || !reasoningStarted) return;
+                  writeEvent({
+                    type: EventType.REASONING_MESSAGE_END,
+                    messageId: reasoningMessageId,
+                  });
+                  writeEvent({
+                    type: EventType.REASONING_END,
+                    messageId: reasoningMessageId,
+                  });
+                  reasoningStarted = false;
+                  reasoningMessageId = null;
+                },
+              }
+            : {}),
+          ...(surfaceSteps
+            ? {
+                onItemEvent: (item: {
+                  itemId?: string;
+                  phase?: string;
+                  title?: string;
+                }) => {
+                  if (closed) return;
+                  const itemId = item.itemId;
+                  if (!itemId) return;
+                  if (item.phase === "started" && !activeSteps.has(itemId)) {
+                    activeSteps.add(itemId);
+                    writeEvent({
+                      type: EventType.STEP_STARTED,
+                      stepName: item.title ?? itemId,
+                    });
+                  } else if (
+                    (item.phase === "completed" || item.phase === "failed") &&
+                    activeSteps.has(itemId)
+                  ) {
+                    activeSteps.delete(itemId);
+                    writeEvent({
+                      type: EventType.STEP_FINISHED,
+                      stepName: item.title ?? itemId,
+                    });
+                  }
+                },
+              }
+            : {}),
         },
       });
 
       // If the dispatcher's final reply didn't close the stream, close it now
       if (!closed) {
+        closeReasoningIfOpen();
         if (messageStarted) {
           writeEvent({
             type: EventType.TEXT_MESSAGE_END,
