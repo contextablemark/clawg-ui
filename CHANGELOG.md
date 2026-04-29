@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.7.0 (2026-04-29)
+
+### Added
+- **Operator-auth AG-UI route at `/v1/clawg-ui/operator`** — for OpenClaw
+  operator-console embedded consumers (notably the new
+  [`@contextableai/clawpilotkit`](./clawpilotkit/) `chat.surface` slot)
+  that already hold a gateway token via OpenClaw's iframe `ExtensionTabContext`
+  handshake. The gateway validates operator scope before our handler runs,
+  so the embedded consumer skips the device-pairing dance entirely.
+  External AG-UI clients (CopilotKit on a different host, `HttpAgent`,
+  etc.) continue to use `/v1/clawg-ui` and pair as before.
+- **`@contextableai/clawpilotkit` companion package** under [`clawpilotkit/`](./clawpilotkit/) —
+  CopilotKit-based chat UI that runs in two modes against this plugin:
+  embedded as an OpenClaw plugin contributing the `chat.surface` slot, or
+  standalone via `npx @contextableai/clawpilotkit` against any clawg-ui
+  gateway. See its README for setup.
+
+### Changed
+- **CORS on AG-UI routes** — both `/v1/clawg-ui` (pairing) and
+  `/v1/clawg-ui/operator` now set `Access-Control-Allow-Origin: *` plus the
+  matching `Allow-Headers`/`Allow-Methods` and answer the `OPTIONS`
+  preflight with `204`. Required for two cross-origin scenarios:
+  - The embedded `chat.surface` slot iframe runs without
+    `allow-same-origin`, so its document origin is opaque (`null`).
+  - The standalone `clawpilotkit` launcher serves the chat UI from its
+    own host:port (e.g. `http://localhost:3939`), separate from the
+    gateway origin.
+  Setting `*` is safe here: route auth still requires either a paired
+  device token or an operator-scope gateway token, which the browser's
+  same-origin policy prevents a third-party origin from minting.
+
+### Internal
+- Extracted the post-authentication AG-UI dispatch from the existing
+  pairing handler into a shared `dispatchAuthenticatedAguiRequest(req,
+  res, runtime, caller)` helper parameterised over an `AuthenticatedCaller`
+  (`{ id, fromLabel }`). The pairing handler feeds the paired device
+  id/label; the new operator handler feeds a fixed operator caller id.
+
 ## 0.6.4 (2026-04-17)
 
 ### Changed

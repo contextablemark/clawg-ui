@@ -207,6 +207,21 @@ export function createAguiHttpHandler(api: OpenClawPluginApi) {
     req: IncomingMessage,
     res: ServerResponse,
   ): Promise<void> {
+    // Cross-origin callers (for example a clawpilotkit standalone launcher
+    // running on a separate port) need CORS response headers — both on the
+    // OPTIONS preflight and on the eventual POST. Bearer auth + JSON body
+    // forces a preflight, so we have to answer 204 here. The route's
+    // gateway-side auth still requires a valid pairing token on the actual
+    // POST: CORS only governs which origins can read the response.
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Headers", "authorization, content-type");
+    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.setHeader("Access-Control-Max-Age", "86400");
+    if (req.method === "OPTIONS") {
+      res.statusCode = 204;
+      res.end();
+      return;
+    }
     // POST-only
     if (req.method !== "POST") {
       sendMethodNotAllowed(res);
@@ -330,6 +345,23 @@ export function createOperatorAguiHttpHandler(api: OpenClawPluginApi) {
     req: IncomingMessage,
     res: ServerResponse,
   ): Promise<void> {
+    // This route is reached from the OpenClaw operator console's
+    // `chat.surface` slot, which runs inside a sandboxed iframe without
+    // `allow-same-origin` — the iframe's document origin is opaque ("null").
+    // Any fetch from that context is treated by the browser as cross-origin
+    // and requires CORS response headers; an `Authorization` request header
+    // forces a preflight OPTIONS we also have to satisfy. `*` is safe here
+    // because the route still requires the gateway operator token, which the
+    // browser's SOP prevents a third-party origin from minting.
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Headers", "authorization, content-type");
+    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.setHeader("Access-Control-Max-Age", "86400");
+    if (req.method === "OPTIONS") {
+      res.statusCode = 204;
+      res.end();
+      return;
+    }
     if (req.method !== "POST") {
       sendMethodNotAllowed(res);
       return;
