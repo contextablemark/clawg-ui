@@ -1334,3 +1334,263 @@ describe("Device pairing", () => {
     expect(body.error.message).toContain("Too many pending pairing requests");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Multimodal content parts (image / audio / video / document / binary)
+// ---------------------------------------------------------------------------
+
+import { existsSync } from "node:fs";
+
+describe("Multimodal content parts", () => {
+  let fakeApi: ReturnType<typeof createFakeApi>;
+  let handler: (req: IncomingMessage, res: ServerResponse) => Promise<void>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.OPENCLAW_GATEWAY_TOKEN = GATEWAY_SECRET;
+    fakeApi = createFakeApi([APPROVED_DEVICE_ID]);
+    handler = createAguiHttpHandler(fakeApi as any);
+  });
+
+  // Minimal valid base64 payload — enough bytes to write a file.
+  const B64 = "SGVsbG8="; // "Hello"
+
+  function makeReq(content: unknown) {
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
+    return createReq({
+      headers: { authorization: `Bearer ${token}` },
+      body: {
+        threadId: "t-mm",
+        runId: "r-mm",
+        messages: [{ role: "user", content }],
+      },
+    });
+  }
+
+  function getDispatchedCtx(): Record<string, unknown> {
+    const rt = (fakeApi as any).runtime;
+    const call = rt.channel.reply.dispatchReplyFromConfig.mock.calls[0][0];
+    return call.ctx;
+  }
+
+  it.each([
+    ["image", "image/png"],
+    ["audio", "audio/mpeg"],
+    ["video", "video/mp4"],
+    ["document", "application/pdf"],
+  ])(
+    "extracts inline %s source part to MediaPath with correct mimeType",
+    async (partType, mimeType) => {
+      const req = makeReq([
+        { type: "text", text: "describe this" },
+        { type: partType, source: { type: "data", value: B64, mimeType } },
+      ]);
+      const res = createRes();
+      await handler(req, res);
+
+      expect(res.statusCode).toBe(200);
+      const ctx = getDispatchedCtx();
+      expect(typeof ctx.MediaPath).toBe("string");
+      expect(ctx.MediaPath).toMatch(/clawg-ui-/);
+      expect(ctx.MediaType).toBe(mimeType);
+      expect(ctx.MediaUrl).toBe(ctx.MediaPath);
+    },
+  );
+
+  it("extracts binary part with inline data field", async () => {
+    const req = makeReq([
+      { type: "text", text: "hi" },
+      { type: "binary", mimeType: "image/png", data: B64, filename: "img.png" },
+    ]);
+    const res = createRes();
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    const ctx = getDispatchedCtx();
+    expect(ctx.MediaType).toBe("image/png");
+    expect(ctx.MediaPath).toMatch(/\.png$/);
+    expect(ctx.MediaFilename).toBe("img.png");
+  });
+
+  it("extracts binary part whose url field is a data: URI", async () => {
+    const req = makeReq([
+      {
+        type: "binary",
+        mimeType: "image/png",
+        url: `data:image/png;base64,${B64}`,
+      },
+    ]);
+    const res = createRes();
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    const ctx = getDispatchedCtx();
+    expect(ctx.MediaType).toBe("image/png");
+    expect(ctx.MediaPath).toMatch(/\.png$/);
+  });
+
+  it("accepts non-image binary mimetypes (e.g. text/csv)", async () => {
+    const req = makeReq([
+      { type: "binary", mimeType: "text/csv", data: B64 },
+    ]);
+    const res = createRes();
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    const ctx = getDispatchedCtx();
+    expect(ctx.MediaType).toBe("text/csv");
+    expect(ctx.MediaPath).toMatch(/\.csv$/);
+  });
+
+  it("sets MediaPaths arrays for multiple mixed attachments, in input order", async () => {
+    const req = makeReq([
+      { type: "text", text: "describe" },
+      { type: "image", source: { type: "data", value: B64, mimeType: "image/png" } },
+      { type: "document", source: { type: "data", value: B64, mimeType: "application/pdf" } },
+      { type: "binary", mimeType: "text/plain", data: B64 },
+    ]);
+    const res = createRes();
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    const ctx = getDispatchedCtx();
+    expect(ctx.MediaPaths).toHaveLength(3);
+    expect(ctx.MediaTypes).toEqual(["image/png", "application/pdf", "text/plain"]);
+    expect(ctx.MediaUrls).toEqual(ctx.MediaPaths);
+    // Scalar fields still point at the first attachment
+    expect(ctx.MediaPath).toBe((ctx.MediaPaths as string[])[0]);
+    expect(ctx.MediaType).toBe("image/png");
+  });
+
+  it("appends categorized attachment marker to the message body", async () => {
+    const req = makeReq([
+      { type: "text", text: "describe these" },
+      { type: "image", source: { type: "data", value: B64, mimeType: "image/png" } },
+      { type: "image", source: { type: "data", value: B64, mimeType: "image/png" } },
+      { type: "document", source: { type: "data", value: B64, mimeType: "application/pdf" } },
+    ]);
+    const res = createRes();
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    const ctx = getDispatchedCtx();
+    const raw = ctx.RawBody as string;
+    expect(raw).toContain("describe these");
+    expect(raw).toContain("[user attached: 2 images, 1 document]");
+  });
+
+  it("keeps the body non-empty when only attachments are present", async () => {
+    const req = makeReq([
+      { type: "image", source: { type: "data", value: B64, mimeType: "image/png" } },
+    ]);
+    const res = createRes();
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    const ctx = getDispatchedCtx();
+    expect(ctx.RawBody).toContain("[user attached: 1 image]");
+  });
+
+  it("rejects source with http(s) URL — 400 invalid_request_error", async () => {
+    const req = makeReq([
+      {
+        type: "image",
+        source: { type: "url", value: "https://example.com/cat.png" },
+      },
+    ]);
+    const res = createRes();
+    await handler(req, res);
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res._chunks.join(""));
+    expect(body.error.type).toBe("invalid_request_error");
+    expect(body.error.message).toMatch(/Remote attachment URLs/);
+  });
+
+  it("rejects binary.url that is http(s) — 400", async () => {
+    const req = makeReq([
+      {
+        type: "binary",
+        mimeType: "image/png",
+        url: "http://example.com/cat.png",
+      },
+    ]);
+    const res = createRes();
+    await handler(req, res);
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("does not call resolveAgentRoute or dispatchReplyFromConfig on URL rejection", async () => {
+    const req = makeReq([
+      {
+        type: "audio",
+        source: { type: "url", value: "https://example.com/a.mp3" },
+      },
+    ]);
+    const res = createRes();
+    await handler(req, res);
+    const rt = (fakeApi as any).runtime;
+    expect(rt.channel.routing.resolveAgentRoute).not.toHaveBeenCalled();
+    expect(rt.channel.reply.dispatchReplyFromConfig).not.toHaveBeenCalled();
+  });
+
+  it("ignores attachment parts on non-user messages", async () => {
+    const token = createDeviceToken(GATEWAY_SECRET, APPROVED_DEVICE_ID);
+    const req = createReq({
+      headers: { authorization: `Bearer ${token}` },
+      body: {
+        threadId: "t-assistant",
+        runId: "r-assistant",
+        messages: [
+          { role: "user", content: "hi" },
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "image",
+                source: { type: "data", value: B64, mimeType: "image/png" },
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const res = createRes();
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    const ctx = getDispatchedCtx();
+    expect(ctx.MediaPath).toBeUndefined();
+  });
+
+  it("skips malformed parts (missing source / mimeType) but processes valid ones", async () => {
+    const req = makeReq([
+      { type: "text", text: "hi" },
+      { type: "image" }, // missing source
+      { type: "binary" }, // missing mimeType
+      { type: "image", source: { type: "data", value: B64, mimeType: "image/png" } },
+    ]);
+    const res = createRes();
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    const ctx = getDispatchedCtx();
+    expect(ctx.MediaPath).toMatch(/\.png$/);
+    expect(ctx.MediaPaths).toBeUndefined(); // only 1 valid attachment
+  });
+
+  it("unlinks temp files after successful dispatch", async () => {
+    const req = makeReq([
+      { type: "image", source: { type: "data", value: B64, mimeType: "image/png" } },
+    ]);
+    const res = createRes();
+    await handler(req, res);
+    const ctx = getDispatchedCtx();
+    expect(existsSync(ctx.MediaPath as string)).toBe(false);
+  });
+
+  it("unlinks temp files even when dispatcher throws", async () => {
+    const rt = (fakeApi as any).runtime;
+    rt.channel.reply.dispatchReplyFromConfig.mockRejectedValueOnce(
+      new Error("boom"),
+    );
+    const req = makeReq([
+      { type: "image", source: { type: "data", value: B64, mimeType: "image/png" } },
+    ]);
+    const res = createRes();
+    await handler(req, res);
+    const ctx = getDispatchedCtx();
+    expect(existsSync(ctx.MediaPath as string)).toBe(false);
+  });
+});
