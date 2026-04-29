@@ -21,6 +21,9 @@
   "bin": {
     "clawpilotkit": "./bin/clawpilotkit.js"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "bin",
     "dist",
