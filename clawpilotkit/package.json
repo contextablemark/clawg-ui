@@ -1,0 +1,65 @@
+{
+  "name": "@contextableai/clawpilotkit",
+  "version": "0.1.0",
+  "description": "CopilotKit-based UI for OpenClaw — embeds into the operator console chat.surface slot and also runs standalone against a clawg-ui gateway",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/contextable/clawg-ui.git",
+    "directory": "clawpilotkit"
+  },
+  "keywords": [
+    "openclaw",
+    "clawg-ui",
+    "copilotkit",
+    "ag-ui",
+    "chat",
+    "slot"
+  ],
+  "main": "./dist/index.js",
+  "bin": {
+    "clawpilotkit": "./bin/clawpilotkit.js"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "openclaw.plugin.json",
+    "ui"
+  ],
+  "scripts": {
+    "build:app": "vite build",
+    "build:plugin": "tsc",
+    "build": "npm run build:app && npm run build:plugin",
+    "dev:app": "vite",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "openclaw": "*"
+  },
+  "devDependencies": {
+    "@ag-ui/client": "^0.0.52",
+    "@copilotkit/react-core": "^1.56.2",
+    "@copilotkit/react-ui": "^1.56.2",
+    "@types/node": "^25.3.5",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "openclaw": "file:../../openclaw",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.9.3",
+    "vite": "^6.0.7",
+    "zod": "^3.23.8"
+  },
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "install": {
+      "npmSpec": "@contextableai/clawpilotkit",
+      "localPath": "extensions/clawpilotkit",
+      "defaultChoice": "npm"
+    }
+  }
+}
