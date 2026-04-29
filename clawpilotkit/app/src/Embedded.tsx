@@ -1,5 +1,16 @@
-import { CopilotKitProvider, CopilotChat } from "@copilotkit/react-core/v2";
+import {
+  CopilotKitProvider,
+  CopilotChat,
+  WildcardToolCallRender,
+} from "@copilotkit/react-core/v2";
 import "@copilotkit/react-core/v2/styles.css";
+
+// Catch-all renderer so any tool call from the agent — `web_search`, MCP
+// tools, plugin tools we don't have a bespoke card for — shows up as a
+// collapsible pill in the message thread instead of being silently folded
+// into the assistant text. Replace or supplement with `defineToolCallRenderer`
+// entries (or `useRenderTool`) once we want bespoke cards for specific tools.
+const RENDER_TOOL_CALLS = [WildcardToolCallRender];
 import { HttpAgent } from "@ag-ui/client";
 import { useEffect, useMemo, useState } from "react";
 import { subscribeContext } from "./openclaw-bridge";
@@ -49,6 +60,7 @@ export function Embedded({ initialCtx }: Props) {
       agent="default"
       selfManagedAgents={{ default: agent }}
       headers={headers}
+      renderToolCalls={RENDER_TOOL_CALLS}
     >
       <div className="clawpilotkit-chat-host">
         <CopilotChat />

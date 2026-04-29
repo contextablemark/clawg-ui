@@ -1,5 +1,12 @@
-import { CopilotKitProvider, CopilotChat } from "@copilotkit/react-core/v2";
+import {
+  CopilotKitProvider,
+  CopilotChat,
+  WildcardToolCallRender,
+} from "@copilotkit/react-core/v2";
 import "@copilotkit/react-core/v2/styles.css";
+
+// See Embedded.tsx for rationale; both modes share the same fallback.
+const RENDER_TOOL_CALLS = [WildcardToolCallRender];
 import { HttpAgent } from "@ag-ui/client";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -221,6 +228,7 @@ function ChatPane({
       agent="default"
       selfManagedAgents={{ default: agent }}
       headers={headers}
+      renderToolCalls={RENDER_TOOL_CALLS}
     >
       <div className="clawpilotkit-chat-host">
         <CopilotChat />
