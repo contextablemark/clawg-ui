@@ -1,0 +1,166 @@
+:root {
+  color-scheme: light dark;
+  --clp-bg: #ffffff;
+  --clp-text: #111;
+  --clp-muted: #666;
+  --clp-border: #e0e0e0;
+  --clp-accent: #4f46e5;
+  --clp-error: #dc2626;
+  --clp-code-bg: #f4f4f5;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+html[data-theme="dark"] {
+  --clp-bg: #1a1a1a;
+  --clp-text: #f5f5f5;
+  --clp-muted: #a3a3a3;
+  --clp-border: #2f2f2f;
+  --clp-accent: #818cf8;
+  --clp-error: #f87171;
+  --clp-code-bg: #262626;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--clp-bg);
+  color: var(--clp-text);
+}
+
+.clawpilotkit-chat-host {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.clawpilotkit-chat-host > * {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+}
+
+/* CopilotKit ships an `@font-face { src: url(https://r2cdn.perplexity.ai/…) }`
+   which the gateway CSP (font-src 'self' …) blocks inside the iframe. Override
+   the font-family on the library's rendered elements to a system stack so the
+   blocked webfont is irrelevant. */
+.copilotKitChat,
+.copilotKitChat *,
+.copilotKitInput,
+.copilotKitInput * {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+}
+
+/* ---------- Standalone chrome ---------- */
+
+.clawpilotkit-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.clawpilotkit-header {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--clp-border);
+}
+
+.clawpilotkit-header h1 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+.clawpilotkit-chrome {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--clp-border);
+  font-size: 0.85rem;
+  color: var(--clp-muted);
+}
+
+.clawpilotkit-chrome code {
+  color: var(--clp-text);
+}
+
+.clawpilotkit-chrome-actions button {
+  margin-left: 0.5rem;
+}
+
+.clawpilotkit-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 1rem;
+}
+
+.clawpilotkit-main > .clawpilotkit-chat-host {
+  padding: 0;
+  margin: 0 -1rem -1rem;
+}
+
+.clawpilotkit-setup,
+.clawpilotkit-pairing {
+  max-width: 36rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.clawpilotkit-setup label {
+  font-weight: 500;
+}
+
+.clawpilotkit-setup input {
+  padding: 0.5rem;
+  border: 1px solid var(--clp-border);
+  border-radius: 4px;
+  background: var(--clp-bg);
+  color: var(--clp-text);
+}
+
+button {
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--clp-border);
+  border-radius: 4px;
+  background: var(--clp-bg);
+  color: var(--clp-text);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+button:hover {
+  border-color: var(--clp-accent);
+}
+
+.clawpilotkit-error {
+  color: var(--clp-error);
+}
+
+.clawpilotkit-status {
+  color: var(--clp-muted);
+  font-size: 0.9rem;
+}
+
+.clawpilotkit-code {
+  padding: 0.75rem;
+  background: var(--clp-code-bg);
+  border-radius: 4px;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+}
+
+.clawpilotkit-button-row {
+  display: flex;
+  gap: 0.5rem;
+}

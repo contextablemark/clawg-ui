@@ -4,6 +4,23 @@
 
 An [OpenClaw](https://github.com/openclaw/openclaw) channel plugin that exposes the gateway as an [AG-UI](https://docs.ag-ui.com) protocol-compatible HTTP endpoint. AG-UI clients such as [CopilotKit](https://www.copilotkit.ai) UIs and `@ag-ui/client` `HttpAgent` instances can connect to OpenClaw and receive streamed responses.
 
+## Companion: `@contextableai/clawpilotkit`
+
+If you want a ready-made chat UI that talks to this plugin, the
+companion package [`@contextableai/clawpilotkit`](./clawpilotkit/) ships
+the same prebuilt React + CopilotKit bundle in two modes:
+
+- **Embedded** in the OpenClaw operator console as a `chat.surface`
+  slot (renders inside the Chat tab in place of the built-in message
+  thread + input box, no pairing needed).
+- **Standalone** via `npx @contextableai/clawpilotkit` against any
+  clawg-ui ≥ 0.7.0 gateway (the launcher walks the user through device
+  pairing on first connect).
+
+See [`clawpilotkit/README.md`](./clawpilotkit/) for setup. The rest of
+this document covers the gateway-side plugin, which is what
+clawpilotkit (and any other AG-UI client) talks to.
+
 ## Installation
 
 ```bash
@@ -355,6 +372,46 @@ curl -N -X POST http://localhost:18789/v1/clawg-ui \
   -H "X-OpenClaw-Agent-Id: my-agent" \
   -d '{"messages":[{"role":"user","content":"Hello"}]}'
 ```
+
+## Session isolation
+
+By default, sessions are keyed by `route.sessionKey` plus a `:thread:<threadId>` suffix so each thread gets its own session within the device. For multi-user applications where each user needs isolated conversation history within a shared AG-UI client, pass the `X-OpenClaw-Session-Key` header to add a `:user:<value>` scope on top:
+
+```bash
+curl -N -X POST http://localhost:18789/v1/clawg-ui \
+  -H "Authorization: Bearer $CLAWG_UI_DEVICE_TOKEN" \
+  -H "X-OpenClaw-Session-Key: user@example.com" \
+  -d '{"messages":[{"role":"user","content":"Hello"}]}'
+```
+
+This is useful when:
+- Multiple authenticated users share the same AG-UI client (e.g., a web app with auth)
+- You want to key sessions by user identity *in addition to* thread ID
+- CopilotKit or other AG-UI clients manage `threadId` internally
+
+### How the final session key is composed
+
+The header **scopes** the route-derived key; it does not replace it:
+
+```
+<route.sessionKey>[:user:<header>][:thread:<threadId>]
+```
+
+With no header, the session key is `<route.sessionKey>:thread:<threadId>` (existing behaviour). With the header set to `alice@example.com` and `threadId: "t-1"`, it becomes `<route.sessionKey>:user:alice@example.com:thread:t-1`. The header can only subdivide an existing route scope — it cannot escape it.
+
+### Trust model — treat this header like `X-Forwarded-For`
+
+`X-OpenClaw-Session-Key` is a **trusted-proxy-only** concern, in the same family as `X-Forwarded-For` and `X-Request-ID`. It is expected to be set by a reverse proxy or authentication middleware that has already authenticated the user — not by end clients.
+
+Deployments that are reachable by untrusted clients **must strip or overwrite this header at the ingress edge** before forwarding to the gateway. If an end client can set this header freely, they can impersonate any other user's session scope for that same device.
+
+### Validation
+
+The header value must match these rules; invalid values return `HTTP 400 invalid_request_error` and the agent is not dispatched:
+
+- 1–256 characters after trimming
+- Characters restricted to `[A-Za-z0-9._@:-]` (covers emails, UUIDs, and colon-separated identifiers)
+- No path-traversal sequences: rejects `..` as a substring, slashes (`/`, `\`), and null bytes
 
 ## Error responses
 

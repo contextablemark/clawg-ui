@@ -1,4 +1,5 @@
 node_modules/
 dist/
+ui/
 *.tgz
-pnpm-lock.yaml
+package-lock.json

@@ -1,0 +1,16 @@
+{
+  "id": "clawpilotkit",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "uiSlots": [
+    {
+      "id": "clawpilotkit-chat-surface",
+      "slot": "chat.surface",
+      "kind": "iframe",
+      "url": "/v1/clawpilotkit/ui/"
+    }
+  ]
+}
